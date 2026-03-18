@@ -6,8 +6,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import com.cpm.cleave.data.Cache
 import com.cpm.cleave.data.Repository
-import com.cpm.cleave.ui.theme.CleaveScreen
 import com.cpm.cleave.ui.theme.CleaveTheme
+import com.cpm.cleave.ui.theme.MainScreen
 import com.cpm.cleave.ui.theme.ViewModel
 
 class MainActivity : ComponentActivity() {
@@ -26,7 +26,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             CleaveTheme {
-                CleaveScreen()
+                MainScreen()
             }
         }
     }
