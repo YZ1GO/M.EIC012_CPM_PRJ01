@@ -24,6 +24,7 @@ class Repository(
     fun getAnonymousLimits(): AnonymousLimits = ANONYMOUS_LIMITS
 
     suspend fun getCurrentUser(): Result<User?> {
+        // TODO(auth-refactor): after auth/session exists, resolve generic active user (anonymous or registered).
         return try {
             Result.success(cache.getActiveAnonymousUser())
         } catch (e: Exception) {

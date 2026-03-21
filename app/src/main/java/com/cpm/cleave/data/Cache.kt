@@ -28,8 +28,12 @@ class Cache(context: Context) {
     }
 
     suspend fun loadGroups(): List<Group> {
-        val groupEntities = groupDao.getAllGroups()
-        return groupEntities.map { entity ->
+        // TODO(auth-refactor): after registered login/session is implemented, replace with generic getActiveUser().
+        val activeUser = userDao.getActiveAnonymousUser() ?: return emptyList()
+        val membershipRows = groupMemberDao.getGroupsOfUser(activeUser.id)
+
+        return membershipRows.mapNotNull { membership ->
+            val entity = groupDao.getGroupById(membership.groupId) ?: return@mapNotNull null
             val members = groupMemberDao.getMembersOfGroup(entity.id)
                 .map { it.userId }
             Group(
@@ -82,6 +86,7 @@ class Cache(context: Context) {
     }
 
     suspend fun getActiveAnonymousUser(): User? {
+        // TODO(auth-refactor): rename to getActiveUser() and resolve active user from session (anonymous or registered).
         return userDao.getActiveAnonymousUser()?.toDomain()
     }
 
