@@ -52,7 +52,7 @@ abstract class CleaveDatabase : RoomDatabase() {
                     CleaveDatabase::class.java,
                     "cleave_database"
                 )
-                    .fallbackToDestructiveMigration()
+                    .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                 INSTANCE = instance
                 instance

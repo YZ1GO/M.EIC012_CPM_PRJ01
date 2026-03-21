@@ -1,7 +1,9 @@
 package com.cpm.cleave.ui.theme
 
+import android.content.pm.ApplicationInfo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,6 +38,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -47,16 +50,19 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.NavController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.cpm.cleave.data.Repository
 import com.cpm.cleave.model.Group
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
@@ -64,14 +70,20 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import com.cpm.cleave.model.User
+import kotlinx.coroutines.launch
 sealed class NavScreen(val route: String, val title: String, val icon: ImageVector? = null) {
     object Groups: NavScreen("groups", "Groups", Icons.Default.Groups)
     object Profile: NavScreen("profile", "Profile", Icons.Default.Person)
     object CreateGroup : NavScreen("create_group", "Create Group")
+    object JoinGroup : NavScreen("join_group", "Join Group")
+    object GroupDetails : NavScreen("group_details/{groupId}", "Group Details") {
+        fun createRoute(groupId: String): String = "group_details/$groupId"
+    }
 }
 
 val navItems = listOf(NavScreen.Groups, NavScreen.Profile)
@@ -105,7 +117,11 @@ fun MainScreen(repository: Repository) {
         },
         bottomBar = {
             if (showBottomBar) {
-                BottomNavigationBar(navController)
+                BottomNavigationBar(
+                    navController = navController,
+                    onCreateGroupClick = { navController.navigate(NavScreen.CreateGroup.route) },
+                    onJoinGroupClick = { navController.navigate(NavScreen.JoinGroup.route) }
+                )
             }
         }
     ) { innerPadding ->
@@ -121,9 +137,12 @@ fun MainScreen(repository: Repository) {
                     }
                 )
 
-                GroupsScreen(groupsViewModel, onCreateGroupClick = {
-                    navController.navigate(NavScreen.CreateGroup.route)
-                })
+                GroupsScreen(
+                    groupsViewModel = groupsViewModel,
+                    onGroupClick = { groupId ->
+                        navController.navigate(NavScreen.GroupDetails.createRoute(groupId))
+                    }
+                )
             }
             composable(NavScreen.Profile.route) { ProfileScreen(repository) }
 
@@ -138,41 +157,114 @@ fun MainScreen(repository: Repository) {
                     navController.popBackStack()
                 })
             }
+
+            composable(NavScreen.JoinGroup.route) {
+                val joinGroupViewModel: JoinGroupViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { JoinGroupViewModel(repository) }
+                    }
+                )
+
+                JoinGroupScreen(joinGroupViewModel, onNavigateBack = {
+                    navController.popBackStack()
+                })
+            }
+
+            composable(
+                route = NavScreen.GroupDetails.route,
+                arguments = listOf(navArgument("groupId") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val groupId = backStackEntry.arguments?.getString("groupId") ?: return@composable
+                GroupDetailsScreen(repository = repository, groupId = groupId)
+            }
         }
     }
 }
 
 @Composable
-fun BottomNavigationBar(navController: NavController) {
+fun BottomNavigationBar(
+    navController: NavController,
+    onCreateGroupClick: () -> Unit,
+    onJoinGroupClick: () -> Unit
+) {
+    var showActionMenu by remember { mutableStateOf(false) }
+
     NavigationBar {
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentRoute = navBackStackEntry?.destination?.route
 
-        navItems.forEach { item ->
-            NavigationBarItem(
-                selected = currentRoute == item.route,
-                onClick = {
-                    navController.navigate(item.route) {
-                        popUpTo(navController.graph.startDestinationId) {
-                            saveState = true
-                        }
-                        launchSingleTop = true
-                        restoreState = true
+        NavigationBarItem(
+            selected = currentRoute == NavScreen.Groups.route,
+            onClick = {
+                navController.navigate(NavScreen.Groups.route) {
+                    popUpTo(navController.graph.startDestinationId) {
+                        saveState = true
                     }
-                },
-                icon = {
-                    item.icon?.let { imageVector ->
-                        Icon(imageVector, contentDescription = item.title)
+                    launchSingleTop = true
+                    restoreState = true
+                }
+            },
+            icon = { Icon(Icons.Default.Groups, contentDescription = NavScreen.Groups.title) },
+            label = { Text(NavScreen.Groups.title) }
+        )
+
+        Box(
+            modifier = Modifier.weight(1f),
+            contentAlignment = Alignment.Center
+        ) {
+            IconButton(
+                onClick = { showActionMenu = !showActionMenu },
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(Color.Blue, CircleShape)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Group actions",
+                    tint = Color.White
+                )
+            }
+
+            DropdownMenu(
+                expanded = showActionMenu,
+                onDismissRequest = { showActionMenu = false }
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Create group") },
+                    onClick = {
+                        showActionMenu = false
+                        onCreateGroupClick()
                     }
-                },
-                label = { Text(item.title) }
-            )
+                )
+                DropdownMenuItem(
+                    text = { Text("Join group") },
+                    onClick = {
+                        showActionMenu = false
+                        onJoinGroupClick()
+                    }
+                )
+            }
         }
+
+        NavigationBarItem(
+            selected = currentRoute == NavScreen.Profile.route,
+            onClick = {
+                navController.navigate(NavScreen.Profile.route) {
+                    popUpTo(navController.graph.startDestinationId) {
+                        saveState = true
+                    }
+                    launchSingleTop = true
+                    restoreState = true
+                }
+            },
+            icon = { Icon(Icons.Default.Person, contentDescription = NavScreen.Profile.title) },
+            label = { Text(NavScreen.Profile.title) }
+        )
     }
 }
 
 @Composable
-fun GroupsScreen(groupsViewModel: GroupsViewModel, onCreateGroupClick: () -> Unit) {
+fun GroupsScreen(groupsViewModel: GroupsViewModel, onGroupClick: (String) -> Unit) {
     LaunchedEffect(Unit) { groupsViewModel.loadGroups() }
 
     val uiState by groupsViewModel.uiState.collectAsState()
@@ -201,15 +293,6 @@ fun GroupsScreen(groupsViewModel: GroupsViewModel, onCreateGroupClick: () -> Uni
                     }
                 )
             )
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            IconButton(
-                onClick = onCreateGroupClick,
-                modifier = Modifier.size(56.dp).background(Color.LightGray.copy(alpha = 0.3f), CircleShape)
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Add Group")
-            }
         }
 
         Spacer(modifier = Modifier.height(32.dp))
@@ -218,16 +301,18 @@ fun GroupsScreen(groupsViewModel: GroupsViewModel, onCreateGroupClick: () -> Uni
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
             items(uiState.groups) { group ->
-                GroupListItem(group = group)
+                GroupListItem(group = group, onClick = { onGroupClick(group.id) })
             }
         }
     }
 }
 
 @Composable
-fun GroupListItem(group: Group) {
+fun GroupListItem(group: Group, onClick: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // TODO CHANGE BOX TO IMAGE
@@ -251,6 +336,54 @@ fun GroupListItem(group: Group) {
                 color = Color.Gray,
                 fontSize = 14.sp
             )
+            Text(
+                text = "Code: ${group.joinCode}",
+                color = Color.Gray,
+                fontSize = 14.sp
+            )
+        }
+    }
+}
+
+@Composable
+fun GroupDetailsScreen(repository: Repository, groupId: String) {
+    var group by remember { mutableStateOf<Group?>(null) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(groupId) {
+        repository.getGroupById(groupId)
+            .onSuccess { group = it }
+            .onFailure { loadError = it.message ?: "Could not load group" }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text("Group Details", fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+
+        loadError?.let { Text(it, color = Color.Red) }
+
+        val currentGroup = group
+        if (currentGroup == null) {
+            Text("Loading group...")
+            return@Column
+        }
+
+        Text("Name: ${currentGroup.name}")
+        Text("Currency: ${currentGroup.currency}")
+        Text("Code: ${currentGroup.joinCode}")
+        Spacer(modifier = Modifier.height(8.dp))
+        Text("Members (${currentGroup.members.size})", fontWeight = FontWeight.Medium)
+
+        if (currentGroup.members.isEmpty()) {
+            Text("No members in this group yet.")
+        } else {
+            currentGroup.members.forEach { memberId ->
+                Text("- $memberId", color = Color.Gray)
+            }
         }
     }
 }
@@ -260,6 +393,10 @@ fun ProfileScreen(repository: Repository) {
     var currentUser by remember { mutableStateOf<User?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
     val limits = remember { repository.getAnonymousLimits() }
+    val coroutineScope = rememberCoroutineScope()
+    
+    // TODO(remove-before-release): remove debug user-switch tools from profile UI.
+    val isDebuggable = (LocalContext.current.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
     LaunchedEffect(Unit) {
         repository.getCurrentUser()
@@ -295,6 +432,61 @@ fun ProfileScreen(repository: Repository) {
             Text("- Max groups: ${limits.maxGroups}")
             Text("- Max expenses per group: ${limits.maxExpensesPerGroup}")
             Text("- Max total debt: ${limits.maxTotalDebt}")
+
+            // TODO(remove-before-release): remove debug user-switch tools from profile UI.
+            if (isDebuggable) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("Debug tools", fontWeight = FontWeight.Medium)
+                Text("Current user id: ${user.id}", color = Color.Gray, fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Button(
+                    onClick = {
+                        coroutineScope.launch {
+                            repository.switchDebugAnonymousUser()
+                                .onSuccess {
+                                    currentUser = it
+                                    loadError = null
+                                }
+                                .onFailure {
+                                    loadError = it.message ?: "Could not switch debug user"
+                                }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF455A64)),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Switch Between User A/B", color = Color.White)
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // TODO(remove-before-release): remove debug room database reset button.
+                Button(
+                    onClick = {
+                        coroutineScope.launch {
+                            repository.clearDebugDatabase()
+                                .onSuccess {
+                                    repository.switchDebugAnonymousUser()
+                                        .onSuccess {
+                                            currentUser = it
+                                            loadError = null
+                                        }
+                                        .onFailure {
+                                            loadError = it.message ?: "Cleared DB, but could not initialize debug user"
+                                        }
+                                }
+                                .onFailure {
+                                    loadError = it.message ?: "Could not clear local database"
+                                }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB00020)),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Clear All Room Data (Debug)", color = Color.White)
+                }
+            }
         }
     }
 }
@@ -403,6 +595,67 @@ fun CreateGroupScreen(viewModel: CreateGroupViewModel, onNavigateBack: () -> Uni
             modifier = Modifier.height(48.dp)
         ) {
             Text("Create Group", fontSize = 16.sp, color = Color.White)
+        }
+    }
+}
+
+@Composable
+fun JoinGroupScreen(viewModel: JoinGroupViewModel, onNavigateBack: () -> Unit) {
+    val uiState by viewModel.uiState.collectAsState()
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Spacer(modifier = Modifier.height(32.dp))
+
+        Text(
+            text = "Join Group",
+            color = Color.Blue,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Medium
+        )
+
+        Spacer(modifier = Modifier.height(48.dp))
+
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text("Join Code", fontSize = 14.sp)
+            OutlinedTextField(
+                value = uiState.joinCode,
+                onValueChange = { viewModel.onJoinCodeChanged(it) },
+                placeholder = { Text("Enter join code") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(48.dp))
+
+        uiState.errorMessage?.let { message ->
+            Text(
+                text = message,
+                color = Color.Red,
+                fontSize = 14.sp
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        Button(
+            onClick = {
+                viewModel.joinGroup(onSuccess = onNavigateBack)
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = Color.Blue),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.height(48.dp).fillMaxWidth(),
+            enabled = !uiState.isLoading
+        ) {
+            Text(
+                if (uiState.isLoading) "Joining..." else "Join Group",
+                fontSize = 16.sp,
+                color = Color.White
+            )
         }
     }
 }

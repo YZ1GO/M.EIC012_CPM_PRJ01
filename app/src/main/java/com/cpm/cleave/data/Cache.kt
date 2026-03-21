@@ -6,6 +6,8 @@ import com.cpm.cleave.data.entities.GroupMemberEntity
 import com.cpm.cleave.data.entities.UserEntity
 import com.cpm.cleave.model.Group
 import com.cpm.cleave.model.User
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class Cache(context: Context) {
     private val database = CleaveDatabase.getDatabase(context)
@@ -114,6 +116,65 @@ class Cache(context: Context) {
         )
         userDao.insertUser(anonymousUser)
         return anonymousUser.toDomain()
+    }
+
+    // TODO(remove-before-release): remove debug-only local user switch helper.
+    suspend fun switchToNewDebugAnonymousUser(baseName: String = "Guest"): User {
+        val now = System.currentTimeMillis()
+        val userAId = "anon_debug_A"
+        val userBId = "anon_debug_B"
+
+        val userA = userDao.getUserById(userAId) ?: UserEntity(
+            id = userAId,
+            name = "$baseName A",
+            email = null,
+            isAnonymous = true,
+            isDeleted = true,
+            lastSeen = now
+        ).also { userDao.insertUser(it) }
+
+        val userB = userDao.getUserById(userBId) ?: UserEntity(
+            id = userBId,
+            name = "$baseName B",
+            email = null,
+            isAnonymous = true,
+            isDeleted = true,
+            lastSeen = now
+        ).also { userDao.insertUser(it) }
+
+        val active = userDao.getActiveAnonymousUser()
+        val nextUserId = if (active?.id == userAId) userBId else userAId
+
+        userDao.getAllUsers()
+            .filter { it.isAnonymous && !it.isDeleted }
+            .forEach {
+                userDao.updateUser(it.copy(isDeleted = true, lastSeen = now))
+            }
+
+        val activateA = nextUserId == userAId
+        userDao.updateUser(
+            userA.copy(
+                isDeleted = !activateA,
+                lastSeen = now
+            )
+        )
+        userDao.updateUser(
+            userB.copy(
+                isDeleted = activateA,
+                lastSeen = now
+            )
+        )
+
+        val switchedUser = userDao.getUserById(nextUserId)
+            ?: throw IllegalStateException("Could not switch debug user.")
+        return switchedUser.toDomain()
+    }
+
+    // TODO(remove-before-release): remove debug-only local database reset helper.
+    suspend fun clearAllDebugData() {
+        withContext(Dispatchers.IO) {
+            database.clearAllTables()
+        }
     }
 
     private suspend fun UserEntity.toDomain(): User {

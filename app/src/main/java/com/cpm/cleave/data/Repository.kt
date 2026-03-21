@@ -39,6 +39,25 @@ class Repository(
         }
     }
 
+    // TODO(remove-before-release): remove debug-only local user switch API.
+    suspend fun switchDebugAnonymousUser(defaultName: String = "Guest"): Result<User> {
+        return try {
+            Result.success(cache.switchToNewDebugAnonymousUser(defaultName))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // TODO(remove-before-release): remove debug-only local database reset API.
+    suspend fun clearDebugDatabase(): Result<Unit> {
+        return try {
+            cache.clearAllDebugData()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun createGroup(name: String, currency: String): Result<Group> {
         return try {
             val anonymousUser = cache.getActiveAnonymousUser()
