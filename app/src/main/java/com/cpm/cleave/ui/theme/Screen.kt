@@ -67,6 +67,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import com.cpm.cleave.model.User
 sealed class NavScreen(val route: String, val title: String, val icon: ImageVector? = null) {
     object Groups: NavScreen("groups", "Groups", Icons.Default.Groups)
     object Profile: NavScreen("profile", "Profile", Icons.Default.Person)
@@ -124,13 +125,13 @@ fun MainScreen(repository: Repository) {
                     navController.navigate(NavScreen.CreateGroup.route)
                 })
             }
-            composable(NavScreen.Profile.route) { /**TODO**/ }
+            composable(NavScreen.Profile.route) { ProfileScreen(repository) }
 
             composable(NavScreen.CreateGroup.route) {
                 val createGroupViewModel: CreateGroupViewModel = viewModel(
-                   factory = viewModelFactory {
-                       initializer { CreateGroupViewModel(repository) }
-                   }
+                    factory = viewModelFactory {
+                        initializer { CreateGroupViewModel(repository) }
+                    }
                 )
 
                 CreateGroupScreen(createGroupViewModel, onNavigateBack = {
@@ -255,8 +256,47 @@ fun GroupListItem(group: Group) {
 }
 
 @Composable
-fun ProfileScreen() {
-    // TODO
+fun ProfileScreen(repository: Repository) {
+    var currentUser by remember { mutableStateOf<User?>(null) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    val limits = remember { repository.getAnonymousLimits() }
+
+    LaunchedEffect(Unit) {
+        repository.getCurrentUser()
+            .onSuccess { currentUser = it }
+            .onFailure { loadError = it.message ?: "Could not load profile" }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text("Profile", fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+
+        loadError?.let {
+            Text(text = it, color = Color.Red)
+        }
+
+        if (currentUser == null) {
+            Text("Loading user...")
+            return@Column
+        }
+
+        val user = currentUser!!
+        Text("Name: ${user.name}")
+        Text("Mode: ${if (user.isAnonymous) "Anonymous" else "Verified"}")
+        Text("Groups joined: ${user.groups.size}")
+
+        if (user.isAnonymous) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Anonymous limits", fontWeight = FontWeight.Medium)
+            Text("- Max groups: ${limits.maxGroups}")
+            Text("- Max expenses per group: ${limits.maxExpensesPerGroup}")
+            Text("- Max total debt: ${limits.maxTotalDebt}")
+        }
+    }
 }
 
 // ExposedDropdownMenuBox is experimental yet
@@ -344,6 +384,15 @@ fun CreateGroupScreen(viewModel: CreateGroupViewModel, onNavigateBack: () -> Uni
         }
 
         Spacer(modifier = Modifier.height(48.dp))
+
+        uiState.errorMessage?.let { message ->
+            Text(
+                text = message,
+                color = Color.Red,
+                fontSize = 14.sp
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
 
         Button(
             onClick = {

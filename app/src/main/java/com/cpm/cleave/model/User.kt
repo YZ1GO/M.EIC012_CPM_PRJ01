@@ -6,5 +6,6 @@ data class User(
     val email: String?,
     val isAnonymous: Boolean,
     val isDeleted: Boolean,
-    val lastSeen: Long
+    val lastSeen: Long,
+    val groups: List<String>
 )

@@ -29,7 +29,7 @@ import com.cpm.cleave.data.entities.UserEntity
         DebtEntity::class,
         PaymentEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class CleaveDatabase : RoomDatabase() {
@@ -51,7 +51,9 @@ abstract class CleaveDatabase : RoomDatabase() {
                     context.applicationContext,
                     CleaveDatabase::class.java,
                     "cleave_database"
-                ).build()
+                )
+                    .fallbackToDestructiveMigration()
+                    .build()
                 INSTANCE = instance
                 instance
             }

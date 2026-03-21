@@ -24,6 +24,9 @@ interface GroupDao {
     @Query("SELECT * FROM groups")
     suspend fun getAllGroups(): List<GroupEntity>
 
+    @Query("SELECT COUNT(*) FROM groups")
+    suspend fun getGroupCount(): Int
+
     @Query("SELECT * FROM groups WHERE joinCode = :joinCode")
     suspend fun getGroupByJoinCode(joinCode: String): GroupEntity?
 }

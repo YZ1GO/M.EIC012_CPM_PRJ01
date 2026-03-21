@@ -23,4 +23,7 @@ interface UserDao {
 
     @Query("SELECT * FROM users")
     suspend fun getAllUsers(): List<UserEntity>
+
+    @Query("SELECT * FROM users WHERE isAnonymous = 1 AND isDeleted = 0 LIMIT 1")
+    suspend fun getActiveAnonymousUser(): UserEntity?
 }

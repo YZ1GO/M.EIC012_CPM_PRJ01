@@ -20,11 +20,11 @@ class CreateGroupViewModel (
     val uiState: StateFlow<CreateGroupUiState> = _uiState.asStateFlow()
 
     fun onNameChanged(newName: String) {
-        _uiState.update { it.copy(Name = newName) }
+        _uiState.update { it.copy(Name = newName, errorMessage = null) }
     }
 
     fun onCurrencyChanged(newCurrency: String) {
-        _uiState.update { it.copy(Currency = newCurrency) }
+        _uiState.update { it.copy(Currency = newCurrency, errorMessage = null) }
     }
 
     fun createGroup(onSuccess: () -> Unit) {
@@ -35,6 +35,10 @@ class CreateGroupViewModel (
             val result = repository.createGroup(state.Name, state.Currency)
             if (result.isSuccess) {
                 onSuccess()
+            } else {
+                _uiState.update {
+                    it.copy(errorMessage = result.exceptionOrNull()?.message ?: "Could not create group")
+                }
             }
         }
     }
