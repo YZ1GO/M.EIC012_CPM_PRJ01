@@ -3,7 +3,10 @@ package com.cpm.cleave.data
 import android.content.Context
 import com.cpm.cleave.data.entities.GroupEntity
 import com.cpm.cleave.data.entities.GroupMemberEntity
+import com.cpm.cleave.data.entities.ExpenseEntity
+import com.cpm.cleave.data.entities.ExpenseSplitEntity
 import com.cpm.cleave.data.entities.UserEntity
+import com.cpm.cleave.model.Expense
 import com.cpm.cleave.model.Group
 import com.cpm.cleave.model.User
 import kotlinx.coroutines.Dispatchers
@@ -13,6 +16,8 @@ class Cache(context: Context) {
     private val database = CleaveDatabase.getDatabase(context)
     private val groupDao = database.groupDao()
     private val groupMemberDao = database.groupMemberDao()
+    private val expenseDao = database.expenseDao()
+    private val expenseSplitDao = database.expenseSplitDao()
     private val userDao = database.userDao()
 
     suspend fun saveGroups(groups: List<Group>) {
@@ -83,6 +88,53 @@ class Cache(context: Context) {
             joinCode = group.joinCode
         )
         groupDao.insertGroup(groupEntity)
+    }
+
+    suspend fun insertExpenseWithSplit(
+        expenseId: String,
+        amount: Double,
+        description: String,
+        date: Long,
+        groupId: String,
+        paidBy: String,
+        memberIds: List<String>
+    ) {
+        val expense = ExpenseEntity(
+            id = expenseId,
+            amount = amount,
+            description = description,
+            date = date,
+            groupId = groupId,
+            paidBy = paidBy
+        )
+        expenseDao.insertExpense(expense)
+
+        if (memberIds.isEmpty()) return
+        val splitAmount = amount / memberIds.size
+
+        memberIds.forEach { memberId ->
+            expenseSplitDao.insertSplit(
+                ExpenseSplitEntity(
+                    expenseId = expenseId,
+                    userId = memberId,
+                    amount = splitAmount
+                )
+            )
+        }
+    }
+
+    suspend fun getExpensesByGroup(groupId: String): List<Expense> {
+        return expenseDao.getExpensesByGroup(groupId).map { entity ->
+            Expense(
+                id = entity.id,
+                amount = entity.amount,
+                description = entity.description,
+                date = entity.date,
+                groupId = entity.groupId,
+                paidByUserId = entity.paidBy,
+                imagePath = entity.imagePath
+            )
+        }
     }
 
     suspend fun getActiveAnonymousUser(): User? {

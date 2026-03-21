@@ -6,5 +6,6 @@ data class Expense(
     val description: String,
     val date: Long,
     val groupId: String,
+    val paidByUserId: String,
     val imagePath: String? = null
 )

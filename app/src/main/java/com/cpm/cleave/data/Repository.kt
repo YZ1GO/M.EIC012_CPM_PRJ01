@@ -1,5 +1,6 @@
 package com.cpm.cleave.data
 
+import com.cpm.cleave.model.Expense
 import com.cpm.cleave.model.Group
 import com.cpm.cleave.model.User
 import java.util.UUID
@@ -7,13 +8,11 @@ import java.util.UUID
 class Repository(
     private val cache: Cache
 ) {
-    // Anonymous mode policy. Only maxGroups is enforced right now.
-    // TODO(anonymous-limits): enforce maxExpensesPerGroup when expense creation flow exists.
-    // TODO(anonymous-limits): enforce maxTotalDebt when debt calculation/settlement flow exists.
+    // Anonymous mode policy. Keep only the 1-group limit for now.
     // TODO(anonymous-limits): enforce feature locks (receipt OCR, QR join/share, cloud sync) when those flows are added.
+    // TODO(anonymous-limits): when debt feature exists, decide if anonymous debt cap is needed.
     data class AnonymousLimits(
         val maxGroups: Int = 1,
-        val maxExpensesPerGroup: Int = 10,
         val maxTotalDebt: Double = 200.0
     )
 
@@ -104,6 +103,14 @@ class Repository(
         }
     }
 
+    suspend fun getExpensesByGroup(groupId: String): Result<List<Expense>> {
+        return try {
+            Result.success(cache.getExpensesByGroup(groupId))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun joinGroupByCode(joinCode: String): Result<Group> {
         return try {
             val group = cache.getGroupByJoinCode(joinCode)
@@ -124,6 +131,56 @@ class Repository(
 
             val updatedGroup = cache.getGroupById(group.id) ?: group
             Result.success(updatedGroup)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun createExpense(
+        groupId: String,
+        amount: Double,
+        description: String,
+        paidByUserId: String,
+        splitMemberIds: List<String>
+    ): Result<Unit> {
+        // TODO(expense-advanced): support multi-payer expenses by accepting payer contributions and validating sum == total.
+        return try {
+            if (amount <= 0.0) {
+                return Result.failure(IllegalArgumentException("Expense amount must be greater than zero."))
+            }
+
+            if (splitMemberIds.isEmpty()) {
+                return Result.failure(IllegalArgumentException("Select at least one member to split with."))
+            }
+
+            val currentUser = cache.getActiveAnonymousUser()
+                ?: return Result.failure(IllegalStateException("No current user found."))
+            val group = cache.getGroupById(groupId)
+                ?: return Result.failure(IllegalArgumentException("Group not found."))
+
+            if (!group.members.contains(currentUser.id)) {
+                return Result.failure(IllegalStateException("Current user is not a member of this group."))
+            }
+
+            if (!group.members.contains(paidByUserId)) {
+                return Result.failure(IllegalArgumentException("Selected payer is not a member of this group."))
+            }
+
+            if (!splitMemberIds.all { group.members.contains(it) }) {
+                return Result.failure(IllegalArgumentException("All split members must belong to the group."))
+            }
+
+            cache.insertExpenseWithSplit(
+                expenseId = UUID.randomUUID().toString(),
+                amount = amount,
+                description = description,
+                date = System.currentTimeMillis(),
+                groupId = groupId,
+                paidBy = paidByUserId,
+                memberIds = splitMemberIds
+            )
+
+            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }

@@ -62,11 +62,13 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -74,13 +76,20 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.cpm.cleave.model.User
+import com.cpm.cleave.model.Expense
 import kotlinx.coroutines.launch
 sealed class NavScreen(val route: String, val title: String, val icon: ImageVector? = null) {
     object Groups: NavScreen("groups", "Groups", Icons.Default.Groups)
     object Profile: NavScreen("profile", "Profile", Icons.Default.Person)
     object CreateGroup : NavScreen("create_group", "Create Group")
     object JoinGroup : NavScreen("join_group", "Join Group")
+    object AddExpense : NavScreen("add_expense/{groupId}", "Add Expense") {
+        fun createRoute(groupId: String): String = "add_expense/$groupId"
+    }
     object GroupDetails : NavScreen("group_details/{groupId}", "Group Details") {
         fun createRoute(groupId: String): String = "group_details/$groupId"
     }
@@ -175,7 +184,30 @@ fun MainScreen(repository: Repository) {
                 arguments = listOf(navArgument("groupId") { type = NavType.StringType })
             ) { backStackEntry ->
                 val groupId = backStackEntry.arguments?.getString("groupId") ?: return@composable
-                GroupDetailsScreen(repository = repository, groupId = groupId)
+                GroupDetailsScreen(
+                    repository = repository,
+                    groupId = groupId,
+                    onAddExpenseClick = { selectedGroupId ->
+                        navController.navigate(NavScreen.AddExpense.createRoute(selectedGroupId))
+                    }
+                )
+            }
+
+            composable(
+                route = NavScreen.AddExpense.route,
+                arguments = listOf(navArgument("groupId") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val groupId = backStackEntry.arguments?.getString("groupId") ?: return@composable
+                val addExpenseViewModel: AddExpenseViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { AddExpenseViewModel(repository, groupId) }
+                    }
+                )
+
+                AddExpenseScreen(
+                    viewModel = addExpenseViewModel,
+                    onNavigateBack = { navController.popBackStack() }
+                )
             }
         }
     }
@@ -346,14 +378,45 @@ fun GroupListItem(group: Group, onClick: () -> Unit) {
 }
 
 @Composable
-fun GroupDetailsScreen(repository: Repository, groupId: String) {
+fun GroupDetailsScreen(
+    repository: Repository,
+    groupId: String,
+    onAddExpenseClick: (String) -> Unit
+) {
     var group by remember { mutableStateOf<Group?>(null) }
+    var expenses by remember { mutableStateOf<List<Expense>>(emptyList()) }
     var loadError by remember { mutableStateOf<String?>(null) }
+    val coroutineScope = rememberCoroutineScope()
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    fun refreshGroupData() {
+        coroutineScope.launch {
+            repository.getGroupById(groupId)
+                .onSuccess { group = it }
+                .onFailure { loadError = it.message ?: "Could not load group" }
+
+            repository.getExpensesByGroup(groupId)
+                .onSuccess {
+                    expenses = it.sortedByDescending { expense -> expense.date }
+                }
+                .onFailure {
+                    loadError = it.message ?: "Could not load expenses"
+                }
+        }
+    }
 
     LaunchedEffect(groupId) {
-        repository.getGroupById(groupId)
-            .onSuccess { group = it }
-            .onFailure { loadError = it.message ?: "Could not load group" }
+        refreshGroupData()
+    }
+
+    DisposableEffect(lifecycleOwner, groupId) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                refreshGroupData()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     Column(
@@ -384,6 +447,31 @@ fun GroupDetailsScreen(repository: Repository, groupId: String) {
             currentGroup.members.forEach { memberId ->
                 Text("- $memberId", color = Color.Gray)
             }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        Text("Expenses (${expenses.size})", fontWeight = FontWeight.Medium)
+
+        if (expenses.isEmpty()) {
+            Text("No expenses yet.")
+        } else {
+            expenses.forEach { expense ->
+                val desc = expense.description.ifBlank { "(No description)" }
+                Text(
+                    text = "- $desc: ${expense.amount} (${expense.paidByUserId})",
+                    color = Color.Gray
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(
+            onClick = { onAddExpenseClick(currentGroup.id) },
+            colors = ButtonDefaults.buttonColors(containerColor = Color.Blue),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Text("Add Expense", color = Color.White)
         }
     }
 }
@@ -430,7 +518,6 @@ fun ProfileScreen(repository: Repository) {
             Spacer(modifier = Modifier.height(8.dp))
             Text("Anonymous limits", fontWeight = FontWeight.Medium)
             Text("- Max groups: ${limits.maxGroups}")
-            Text("- Max expenses per group: ${limits.maxExpensesPerGroup}")
             Text("- Max total debt: ${limits.maxTotalDebt}")
 
             // TODO(remove-before-release): remove debug user-switch tools from profile UI.
@@ -654,6 +741,171 @@ fun JoinGroupScreen(viewModel: JoinGroupViewModel, onNavigateBack: () -> Unit) {
             Text(
                 if (uiState.isLoading) "Joining..." else "Join Group",
                 fontSize = 16.sp,
+                color = Color.White
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit) {
+    val uiState by viewModel.uiState.collectAsState()
+    var payerExpanded by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Spacer(modifier = Modifier.height(24.dp))
+        Text(
+            text = "Add Expense",
+            color = Color.Blue,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Medium
+        )
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text("Amount", fontSize = 14.sp)
+            OutlinedTextField(
+                value = uiState.amountInput,
+                onValueChange = { viewModel.onAmountChanged(it) },
+                placeholder = { Text("0.00") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text("Description", fontSize = 14.sp)
+            OutlinedTextField(
+                value = uiState.description,
+                onValueChange = { viewModel.onDescriptionChanged(it) },
+                placeholder = { Text("Dinner, groceries, fuel...") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text("Who paid?", fontSize = 14.sp)
+            // TODO(expense-advanced): replace single payer picker with optional multi-payer section and amount inputs.
+            ExposedDropdownMenuBox(
+                expanded = payerExpanded,
+                onExpandedChange = { payerExpanded = !payerExpanded }
+            ) {
+                OutlinedTextField(
+                    value = uiState.payerId,
+                    onValueChange = {},
+                    readOnly = true,
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = payerExpanded) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .menuAnchor(type = ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+                    shape = RoundedCornerShape(8.dp)
+                )
+
+                ExposedDropdownMenu(
+                    expanded = payerExpanded,
+                    onDismissRequest = { payerExpanded = false }
+                ) {
+                    uiState.availablePayers.forEach { payer ->
+                        DropdownMenuItem(
+                            text = { Text(payer) },
+                            onClick = {
+                                viewModel.onPayerChanged(payer)
+                                payerExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text("How to split?", fontSize = 14.sp)
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { viewModel.onSplitModeChanged(SplitMode.ALL_MEMBERS) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (uiState.splitMode == SplitMode.ALL_MEMBERS) Color.Blue else Color.LightGray
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("All members", color = Color.White)
+                }
+
+                Button(
+                    onClick = { viewModel.onSplitModeChanged(SplitMode.SELECTED_MEMBERS) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (uiState.splitMode == SplitMode.SELECTED_MEMBERS) Color.Blue else Color.LightGray
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Selected members", color = Color.White)
+                }
+            }
+
+            if (uiState.splitMode == SplitMode.SELECTED_MEMBERS) {
+                Spacer(modifier = Modifier.height(8.dp))
+                uiState.availablePayers.forEach { memberId ->
+                    val isPayer = memberId == uiState.payerId
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = uiState.selectedSplitMemberIds.contains(memberId),
+                            enabled = !isPayer,
+                            onCheckedChange = { checked ->
+                                viewModel.onSplitMemberToggled(memberId, checked)
+                            }
+                        )
+                        Text(
+                            text = if (isPayer) "$memberId (payer, required)" else memberId,
+                            color = Color.Gray
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        uiState.errorMessage?.let {
+            Text(text = it, color = Color.Red, fontSize = 14.sp)
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        Button(
+            onClick = { viewModel.createExpense(onSuccess = onNavigateBack) },
+            colors = ButtonDefaults.buttonColors(containerColor = Color.Blue),
+            shape = RoundedCornerShape(8.dp),
+            enabled = !uiState.isLoading,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+        ) {
+            Text(
+                if (uiState.isLoading) "Creating..." else "Create Expense",
                 color = Color.White
             )
         }
