@@ -1,23 +1,23 @@
-package com.cpm.cleave.data
+package com.cpm.cleave.data.local
 
 import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
-import com.cpm.cleave.data.daos.DebtDao
-import com.cpm.cleave.data.daos.ExpenseDao
-import com.cpm.cleave.data.daos.ExpenseSplitDao
-import com.cpm.cleave.data.daos.GroupDao
-import com.cpm.cleave.data.daos.GroupMemberDao
-import com.cpm.cleave.data.daos.PaymentDao
-import com.cpm.cleave.data.daos.UserDao
-import com.cpm.cleave.data.entities.DebtEntity
-import com.cpm.cleave.data.entities.ExpenseEntity
-import com.cpm.cleave.data.entities.ExpenseSplitEntity
-import com.cpm.cleave.data.entities.GroupEntity
-import com.cpm.cleave.data.entities.GroupMemberEntity
-import com.cpm.cleave.data.entities.PaymentEntity
-import com.cpm.cleave.data.entities.UserEntity
+import com.cpm.cleave.data.local.daos.DebtDao
+import com.cpm.cleave.data.local.daos.ExpenseDao
+import com.cpm.cleave.data.local.daos.ExpenseSplitDao
+import com.cpm.cleave.data.local.daos.GroupDao
+import com.cpm.cleave.data.local.daos.GroupMemberDao
+import com.cpm.cleave.data.local.daos.PaymentDao
+import com.cpm.cleave.data.local.daos.UserDao
+import com.cpm.cleave.data.local.entities.DebtEntity
+import com.cpm.cleave.data.local.entities.ExpenseEntity
+import com.cpm.cleave.data.local.entities.ExpenseSplitEntity
+import com.cpm.cleave.data.local.entities.GroupEntity
+import com.cpm.cleave.data.local.entities.GroupMemberEntity
+import com.cpm.cleave.data.local.entities.PaymentEntity
+import com.cpm.cleave.data.local.entities.UserEntity
 
 @Database(
     entities = [

@@ -1,11 +1,11 @@
-package com.cpm.cleave.data
+package com.cpm.cleave.data.local
 
 import android.content.Context
-import com.cpm.cleave.data.entities.GroupEntity
-import com.cpm.cleave.data.entities.GroupMemberEntity
-import com.cpm.cleave.data.entities.ExpenseEntity
-import com.cpm.cleave.data.entities.ExpenseSplitEntity
-import com.cpm.cleave.data.entities.UserEntity
+import com.cpm.cleave.data.local.entities.GroupEntity
+import com.cpm.cleave.data.local.entities.GroupMemberEntity
+import com.cpm.cleave.data.local.entities.ExpenseEntity
+import com.cpm.cleave.data.local.entities.ExpenseSplitEntity
+import com.cpm.cleave.data.local.entities.UserEntity
 import com.cpm.cleave.model.Expense
 import com.cpm.cleave.model.Group
 import com.cpm.cleave.model.User

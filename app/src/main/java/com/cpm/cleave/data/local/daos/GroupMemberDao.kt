@@ -1,11 +1,11 @@
-package com.cpm.cleave.data.daos
+package com.cpm.cleave.data.local.daos
 
 import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import com.cpm.cleave.data.entities.GroupMemberEntity
+import com.cpm.cleave.data.local.entities.GroupMemberEntity
 
 @Dao
 interface GroupMemberDao {

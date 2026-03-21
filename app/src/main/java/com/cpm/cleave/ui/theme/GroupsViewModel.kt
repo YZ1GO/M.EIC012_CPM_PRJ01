@@ -2,7 +2,7 @@ package com.cpm.cleave.ui.theme
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.cpm.cleave.data.Repository
+import com.cpm.cleave.data.repository.contracts.IGroupRepository
 import com.cpm.cleave.model.Group
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class GroupsViewModel(
-    private val repository: Repository
+    private val repository: IGroupRepository
 ) : ViewModel() {
 
     // The internal state that can be changed

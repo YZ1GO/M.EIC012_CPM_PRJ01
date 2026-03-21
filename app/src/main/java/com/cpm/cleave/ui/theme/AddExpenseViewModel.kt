@@ -2,7 +2,8 @@ package com.cpm.cleave.ui.theme
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.cpm.cleave.data.Repository
+import com.cpm.cleave.data.repository.contracts.IExpenseRepository
+import com.cpm.cleave.data.repository.contracts.IGroupRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -10,7 +11,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class AddExpenseViewModel(
-    private val repository: Repository,
+    private val groupRepository: IGroupRepository,
+    private val expenseRepository: IExpenseRepository,
     private val groupId: String
 ) : ViewModel() {
 
@@ -23,7 +25,7 @@ class AddExpenseViewModel(
 
     private fun loadGroupMembers() {
         viewModelScope.launch {
-            repository.getGroupById(groupId)
+            groupRepository.getGroupById(groupId)
                 .onSuccess { group ->
                     val members = group?.members ?: emptyList()
                     _uiState.update {
@@ -111,7 +113,7 @@ class AddExpenseViewModel(
         _uiState.update { it.copy(isLoading = true) }
 
         viewModelScope.launch {
-            repository.createExpense(
+            expenseRepository.createExpense(
                 groupId = groupId,
                 amount = amount,
                 description = state.description,

@@ -56,7 +56,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.cpm.cleave.data.Repository
+import com.cpm.cleave.data.repository.contracts.IAuthRepository
+import com.cpm.cleave.data.repository.contracts.IExpenseRepository
+import com.cpm.cleave.data.repository.contracts.IGroupRepository
 import com.cpm.cleave.model.Group
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.filled.CameraAlt
@@ -99,7 +101,11 @@ val navItems = listOf(NavScreen.Groups, NavScreen.Profile)
 
 @OptIn(ExperimentalMaterial3Api::class) // TopAppBar is experimental yet
 @Composable
-fun MainScreen(repository: Repository) {
+fun MainScreen(
+    authRepository: IAuthRepository,
+    groupRepository: IGroupRepository,
+    expenseRepository: IExpenseRepository
+) {
     val navController = rememberNavController()
 
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -142,7 +148,7 @@ fun MainScreen(repository: Repository) {
             composable(NavScreen.Groups.route) {
                 val groupsViewModel: GroupsViewModel = viewModel(
                     factory = viewModelFactory {
-                        initializer { GroupsViewModel(repository) }
+                        initializer { GroupsViewModel(groupRepository) }
                     }
                 )
 
@@ -153,12 +159,12 @@ fun MainScreen(repository: Repository) {
                     }
                 )
             }
-            composable(NavScreen.Profile.route) { ProfileScreen(repository) }
+            composable(NavScreen.Profile.route) { ProfileScreen(authRepository) }
 
             composable(NavScreen.CreateGroup.route) {
                 val createGroupViewModel: CreateGroupViewModel = viewModel(
                     factory = viewModelFactory {
-                        initializer { CreateGroupViewModel(repository) }
+                        initializer { CreateGroupViewModel(groupRepository) }
                     }
                 )
 
@@ -170,7 +176,7 @@ fun MainScreen(repository: Repository) {
             composable(NavScreen.JoinGroup.route) {
                 val joinGroupViewModel: JoinGroupViewModel = viewModel(
                     factory = viewModelFactory {
-                        initializer { JoinGroupViewModel(repository) }
+                        initializer { JoinGroupViewModel(groupRepository) }
                     }
                 )
 
@@ -185,7 +191,8 @@ fun MainScreen(repository: Repository) {
             ) { backStackEntry ->
                 val groupId = backStackEntry.arguments?.getString("groupId") ?: return@composable
                 GroupDetailsScreen(
-                    repository = repository,
+                    groupRepository = groupRepository,
+                    expenseRepository = expenseRepository,
                     groupId = groupId,
                     onAddExpenseClick = { selectedGroupId ->
                         navController.navigate(NavScreen.AddExpense.createRoute(selectedGroupId))
@@ -200,7 +207,13 @@ fun MainScreen(repository: Repository) {
                 val groupId = backStackEntry.arguments?.getString("groupId") ?: return@composable
                 val addExpenseViewModel: AddExpenseViewModel = viewModel(
                     factory = viewModelFactory {
-                        initializer { AddExpenseViewModel(repository, groupId) }
+                        initializer {
+                            AddExpenseViewModel(
+                                groupRepository = groupRepository,
+                                expenseRepository = expenseRepository,
+                                groupId = groupId
+                            )
+                        }
                     }
                 )
 
@@ -379,7 +392,8 @@ fun GroupListItem(group: Group, onClick: () -> Unit) {
 
 @Composable
 fun GroupDetailsScreen(
-    repository: Repository,
+    groupRepository: IGroupRepository,
+    expenseRepository: IExpenseRepository,
     groupId: String,
     onAddExpenseClick: (String) -> Unit
 ) {
@@ -391,11 +405,11 @@ fun GroupDetailsScreen(
 
     fun refreshGroupData() {
         coroutineScope.launch {
-            repository.getGroupById(groupId)
+            groupRepository.getGroupById(groupId)
                 .onSuccess { group = it }
                 .onFailure { loadError = it.message ?: "Could not load group" }
 
-            repository.getExpensesByGroup(groupId)
+            expenseRepository.getExpensesByGroup(groupId)
                 .onSuccess {
                     expenses = it.sortedByDescending { expense -> expense.date }
                 }
@@ -477,7 +491,7 @@ fun GroupDetailsScreen(
 }
 
 @Composable
-fun ProfileScreen(repository: Repository) {
+fun ProfileScreen(repository: IAuthRepository) {
     var currentUser by remember { mutableStateOf<User?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
     val limits = remember { repository.getAnonymousLimits() }

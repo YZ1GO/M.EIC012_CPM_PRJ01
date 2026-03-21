@@ -1,4 +1,4 @@
-package com.cpm.cleave.data.entities
+package com.cpm.cleave.data.local.entities
 
 import androidx.room.Entity
 import androidx.room.ForeignKey

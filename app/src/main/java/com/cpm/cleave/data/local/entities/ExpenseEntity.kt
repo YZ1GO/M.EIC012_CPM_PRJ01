@@ -1,4 +1,4 @@
-package com.cpm.cleave.data.entities
+package com.cpm.cleave.data.local.entities
 
 import androidx.room.Entity
 import androidx.room.ForeignKey
@@ -6,7 +6,7 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 
 @Entity(
-    tableName = "group_members",
+    tableName = "expenses",
     foreignKeys = [
         ForeignKey(
             entity = GroupEntity::class,
@@ -17,19 +17,22 @@ import androidx.room.PrimaryKey
         ForeignKey(
             entity = UserEntity::class,
             parentColumns = ["id"],
-            childColumns = ["userId"],
+            childColumns = ["paidBy"],
             onDelete = ForeignKey.CASCADE
         )
     ],
     indices = [
-        Index(value = ["groupId", "userId"], unique = true),
         Index(value = ["groupId"]),
-        Index(value = ["userId"])
+        Index(value = ["paidBy"])
     ]
 )
-data class GroupMemberEntity(
-    @PrimaryKey(autoGenerate = true)
-    val id: Int = 0,
+data class ExpenseEntity(
+    @PrimaryKey
+    val id: String,
+    val amount: Double,
+    val description: String,
+    val date: Long,
     val groupId: String,
-    val userId: String
+    val paidBy: String,
+    val imagePath: String? = null
 )
