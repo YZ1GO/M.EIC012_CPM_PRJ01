@@ -1,4 +1,4 @@
-package com.cpm.cleave.ui.theme
+package com.cpm.cleave.ui.features.addexpense
 
 enum class SplitMode {
     ALL_MEMBERS,

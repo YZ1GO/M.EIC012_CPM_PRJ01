@@ -1,4 +1,4 @@
-package com.cpm.cleave.ui.theme
+package com.cpm.cleave.ui.features.joingroup
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
