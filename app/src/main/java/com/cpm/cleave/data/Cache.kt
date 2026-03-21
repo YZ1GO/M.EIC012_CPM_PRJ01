@@ -1,47 +1,65 @@
 package com.cpm.cleave.data
 
 import android.content.Context
+import com.cpm.cleave.data.entities.GroupEntity
+import com.cpm.cleave.data.entities.GroupMemberEntity
 import com.cpm.cleave.model.Group
-import org.json.JSONArray
-import org.json.JSONObject
-import androidx.core.content.edit
 
 class Cache(context: Context) {
-    private val prefs = context.getSharedPreferences("groups_cache", Context.MODE_PRIVATE)
-    private val key = "cached_groups"
+    private val database = CleaveDatabase.getDatabase(context)
+    private val groupDao = database.groupDao()
+    private val groupMemberDao = database.groupMemberDao()
 
-    fun saveGroups(groups: List<Group>) {
-        val array = JSONArray()
+    suspend fun saveGroups(groups: List<Group>) {
         groups.forEach { group ->
-            val obj = JSONObject()
-            obj.put("id", group.id)
-            obj.put("name", group.name)
-            obj.put("currency", group.currency)
-
-            array.put(obj)
+            val groupEntity = GroupEntity(
+                id = group.id,
+                name = group.name,
+                currency = group.currency,
+                joinCode = group.joinCode
+            )
+            groupDao.insertGroup(groupEntity)
         }
-        prefs.edit { putString(key, array.toString()) }
     }
 
-    fun loadGroups(): List<Group> {
-        val json = prefs.getString(key, null) ?: return emptyList()
-        val array = JSONArray(json)
-
-        val groups = mutableListOf<Group>()
-        for (i in 0 until array.length()) {
-            val obj = array.getJSONObject(i)
-            groups.add(
-                Group(
-                    id = obj.getString("id"),
-                    name = obj.getString("name"),
-                    currency = obj.getString("currency"),
-                    members = emptyList(),
-                    joinCode = "",
-                    balances = emptyMap()
-                )
+    suspend fun loadGroups(): List<Group> {
+        val groupEntities = groupDao.getAllGroups()
+        return groupEntities.map { entity ->
+            val members = groupMemberDao.getMembersOfGroup(entity.id)
+                .map { it.userId }
+            Group(
+                id = entity.id,
+                name = entity.name,
+                currency = entity.currency,
+                members = members,
+                joinCode = entity.joinCode,
+                balances = emptyMap() // TODO: Calculate from debts
             )
         }
-        return groups
+    }
+
+    suspend fun getGroupById(groupId: String): Group? {
+        val groupEntity = groupDao.getGroupById(groupId) ?: return null
+        val members = groupMemberDao.getMembersOfGroup(groupId)
+            .map { it.userId }
+        return Group(
+            id = groupEntity.id,
+            name = groupEntity.name,
+            currency = groupEntity.currency,
+            members = members,
+            joinCode = groupEntity.joinCode,
+            balances = emptyMap()
+        )
+    }
+
+    suspend fun insertGroup(group: Group) {
+        val groupEntity = GroupEntity(
+            id = group.id,
+            name = group.name,
+            currency = group.currency,
+            joinCode = group.joinCode
+        )
+        groupDao.insertGroup(groupEntity)
     }
 
 }

@@ -1,12 +1,14 @@
 package com.cpm.cleave.ui.theme
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.cpm.cleave.data.Repository
 import com.cpm.cleave.model.Group
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 class GroupsViewModel(
     private val repository: Repository
@@ -21,18 +23,21 @@ class GroupsViewModel(
     init {
         loadGroups()
     }
+
     fun loadGroups() {
-        repository.getGroups()
-            .onSuccess { savedGroups ->
-                _uiState.update {
-                    it.copy(isLoading = false, groups = savedGroups)
+        viewModelScope.launch {
+            repository.getGroups()
+                .onSuccess { savedGroups ->
+                    _uiState.update {
+                        it.copy(isLoading = false, groups = savedGroups)
+                    }
                 }
-            }
-            .onFailure { error ->
-                _uiState.update {
-                    it.copy(isLoading = false, groups = emptyList())
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(isLoading = false, groups = emptyList())
+                    }
                 }
-            }
+        }
     }
 
     fun onSearchQueryChanged(newQuery: String) {

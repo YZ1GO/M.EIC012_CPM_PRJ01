@@ -1,16 +1,15 @@
 package com.cpm.cleave.data
 
 import com.cpm.cleave.model.Group
+import java.util.UUID
 
 class Repository(
     private val cache: Cache
 ) {
-    fun createGroup(name: String, currency: String): Result<Group> {
+    suspend fun createGroup(name: String, currency: String): Result<Group> {
         return try {
-            val currentGroups = cache.loadGroups().toMutableList()
-
             val newGroup = Group(
-                id = currentGroups.size.toString(),
+                id = UUID.randomUUID().toString(),
                 name = name,
                 currency = currency,
                 members = emptyList(),
@@ -18,8 +17,7 @@ class Repository(
                 balances = emptyMap()
             )
 
-            currentGroups.add(newGroup)
-            cache.saveGroups(currentGroups)
+            cache.insertGroup(newGroup)
 
             Result.success(newGroup)
         } catch (e: Exception) {
@@ -27,9 +25,17 @@ class Repository(
         }
     }
 
-    fun getGroups(): Result<List<Group>> {
+    suspend fun getGroups(): Result<List<Group>> {
         return try {
             Result.success(cache.loadGroups())
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getGroupById(groupId: String): Result<Group?> {
+        return try {
+            Result.success(cache.getGroupById(groupId))
         } catch (e: Exception) {
             Result.failure(e)
         }

@@ -1,11 +1,13 @@
 package com.cpm.cleave.ui.theme
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.cpm.cleave.data.Repository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 class CreateGroupViewModel (
     private val repository: Repository
@@ -29,9 +31,11 @@ class CreateGroupViewModel (
         val state = _uiState.value
         if (state.Name.isBlank()) return
 
-        val result = repository.createGroup(state.Name, state.Currency)
-        if (result.isSuccess) {
-            onSuccess()
+        viewModelScope.launch {
+            val result = repository.createGroup(state.Name, state.Currency)
+            if (result.isSuccess) {
+                onSuccess()
+            }
         }
     }
 }
