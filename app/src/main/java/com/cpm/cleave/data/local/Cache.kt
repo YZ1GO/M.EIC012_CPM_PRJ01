@@ -7,6 +7,7 @@ import com.cpm.cleave.data.local.entities.ExpenseEntity
 import com.cpm.cleave.data.local.entities.ExpenseSplitEntity
 import com.cpm.cleave.data.local.entities.UserEntity
 import com.cpm.cleave.model.Expense
+import com.cpm.cleave.model.ExpenseShare
 import com.cpm.cleave.model.Group
 import com.cpm.cleave.model.User
 import kotlinx.coroutines.Dispatchers
@@ -47,7 +48,8 @@ class Cache(context: Context) {
                 currency = entity.currency,
                 members = members,
                 joinCode = entity.joinCode,
-                balances = emptyMap() // TODO: Calculate from debts
+                // Balances are derived from calculated debts in the group details flow.
+                balances = emptyMap()
             )
         }
     }
@@ -133,6 +135,15 @@ class Cache(context: Context) {
                 groupId = entity.groupId,
                 paidByUserId = entity.paidBy,
                 imagePath = entity.imagePath
+            )
+        }
+    }
+
+    suspend fun getExpenseSharesForExpense(expenseId: String): List<ExpenseShare> {
+        return expenseSplitDao.getSplitsForExpense(expenseId).map { split ->
+            ExpenseShare(
+                userId = split.userId,
+                amount = split.amount
             )
         }
     }

@@ -47,6 +47,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.cpm.cleave.data.repository.contracts.IExpenseRepository
 import com.cpm.cleave.data.repository.contracts.IGroupRepository
+import com.cpm.cleave.model.Debt
 import com.cpm.cleave.model.Expense
 import com.cpm.cleave.model.Group
 import kotlinx.coroutines.launch
@@ -142,6 +143,7 @@ fun GroupDetailsScreen(
 ) {
     var group by remember { mutableStateOf<Group?>(null) }
     var expenses by remember { mutableStateOf<List<Expense>>(emptyList()) }
+    var debts by remember { mutableStateOf<List<Debt>>(emptyList()) }
     var loadError by remember { mutableStateOf<String?>(null) }
     val coroutineScope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -158,6 +160,12 @@ fun GroupDetailsScreen(
                 }
                 .onFailure {
                     loadError = it.message ?: "Could not load expenses" }
+
+            expenseRepository.getDebtsByGroup(groupId)
+                .onSuccess { debts = it }
+                .onFailure {
+                    loadError = it.message ?: "Could not calculate debts"
+                }
         }
     }
 
@@ -215,6 +223,20 @@ fun GroupDetailsScreen(
                 val desc = expense.description.ifBlank { "(No description)" }
                 Text(
                     text = "- $desc: ${expense.amount} (${expense.paidByUserId})",
+                    color = Color.Gray
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        Text("Debts (${debts.size})", fontWeight = FontWeight.Medium)
+
+        if (debts.isEmpty()) {
+            Text("No debts yet.")
+        } else {
+            debts.forEach { debt ->
+                Text(
+                    text = "- ${debt.fromUser} owes ${debt.toUser}: ${debt.amount}",
                     color = Color.Gray
                 )
             }

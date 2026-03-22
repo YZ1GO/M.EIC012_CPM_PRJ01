@@ -2,16 +2,39 @@ package com.cpm.cleave.data.repository.impl
 
 import com.cpm.cleave.data.local.Cache
 import com.cpm.cleave.data.repository.contracts.IExpenseRepository
+import com.cpm.cleave.domain.debt.DebtCalculator
+import com.cpm.cleave.model.Debt
 import com.cpm.cleave.model.Expense
 import java.util.UUID
 
 class ExpenseRepositoryImpl(
-    private val cache: Cache
+    private val cache: Cache,
+    private val debtCalculator: DebtCalculator = DebtCalculator()
 ) : IExpenseRepository {
 
     override suspend fun getExpensesByGroup(groupId: String): Result<List<Expense>> {
         return try {
             Result.success(cache.getExpensesByGroup(groupId))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun getDebtsByGroup(groupId: String): Result<List<Debt>> {
+        return try {
+            val group = cache.getGroupById(groupId) ?: return Result.success(emptyList())
+            val expenses = cache.getExpensesByGroup(groupId)
+            val sharesByExpenseId = expenses.associate { expense ->
+                expense.id to cache.getExpenseSharesForExpense(expense.id)
+            }
+
+            Result.success(
+                debtCalculator.calculateDebts(
+                    groupMembers = group.members,
+                    expenses = expenses,
+                    sharesByExpenseId = sharesByExpenseId
+                )
+            )
         } catch (e: Exception) {
             Result.failure(e)
         }
