@@ -2,7 +2,7 @@ package com.cpm.cleave.ui.features.joingroup
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.cpm.cleave.data.repository.contracts.IGroupRepository
+import com.cpm.cleave.domain.usecase.RequestJoinGroupUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class JoinGroupViewModel(
-    private val repository: IGroupRepository
+    private val requestJoinGroupUseCase: RequestJoinGroupUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(JoinGroupUiState())
@@ -30,7 +30,7 @@ class JoinGroupViewModel(
         _uiState.update { it.copy(isLoading = true) }
 
         viewModelScope.launch {
-            val result = repository.joinGroupByCode(state.joinCode)
+            val result = requestJoinGroupUseCase.execute(state.joinCode)
             if (result.isSuccess) {
                 _uiState.update { it.copy(isLoading = false, successMessage = "Joined group successfully!") }
                 onSuccess()

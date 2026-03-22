@@ -2,8 +2,8 @@ package com.cpm.cleave.ui.features.addexpense
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.cpm.cleave.data.repository.contracts.IExpenseRepository
-import com.cpm.cleave.data.repository.contracts.IGroupRepository
+import com.cpm.cleave.domain.usecase.GetAddExpenseMembersUseCase
+import com.cpm.cleave.domain.usecase.RequestCreateExpenseUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -11,8 +11,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class AddExpenseViewModel(
-    private val groupRepository: IGroupRepository,
-    private val expenseRepository: IExpenseRepository,
+    private val getAddExpenseMembersUseCase: GetAddExpenseMembersUseCase,
+    private val requestCreateExpenseUseCase: RequestCreateExpenseUseCase,
     private val groupId: String
 ) : ViewModel() {
 
@@ -25,9 +25,8 @@ class AddExpenseViewModel(
 
     private fun loadGroupMembers() {
         viewModelScope.launch {
-            groupRepository.getGroupById(groupId)
-                .onSuccess { group ->
-                    val members = group?.members ?: emptyList()
+            getAddExpenseMembersUseCase.execute(groupId)
+                .onSuccess { members ->
                     _uiState.update {
                         it.copy(
                             availablePayers = members,
@@ -113,7 +112,7 @@ class AddExpenseViewModel(
         _uiState.update { it.copy(isLoading = true) }
 
         viewModelScope.launch {
-            expenseRepository.createExpense(
+            requestCreateExpenseUseCase.execute(
                 groupId = groupId,
                 amount = amount,
                 description = state.description,

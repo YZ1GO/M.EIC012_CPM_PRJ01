@@ -1,6 +1,6 @@
-package com.cpm.cleave.data.repository.contracts
+package com.cpm.cleave.domain.repository.contracts
 
-import com.cpm.cleave.data.repository.AnonymousLimits
+import com.cpm.cleave.domain.repository.AnonymousLimits
 import com.cpm.cleave.model.User
 
 interface IAuthRepository {
@@ -8,8 +8,8 @@ interface IAuthRepository {
     suspend fun getCurrentUser(): Result<User?>
     suspend fun getOrCreateAnonymousUser(defaultName: String = "Guest"): Result<User>
 
-    // TODO(remove-before-release)
+    // TODO: delete
     suspend fun switchDebugAnonymousUser(defaultName: String = "Guest"): Result<User>
-    // TODO(remove-before-release)
+    // TODO: delete
     suspend fun clearDebugDatabase(): Result<Unit>
 }

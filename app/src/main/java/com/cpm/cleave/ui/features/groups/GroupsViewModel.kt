@@ -2,8 +2,7 @@ package com.cpm.cleave.ui.features.groups
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.cpm.cleave.data.repository.contracts.IGroupRepository
-import com.cpm.cleave.model.Group
+import com.cpm.cleave.domain.usecase.GetGroupsUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -11,7 +10,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class GroupsViewModel(
-    private val repository: IGroupRepository
+    private val getGroupsUseCase: GetGroupsUseCase
 ) : ViewModel() {
 
     // The internal state that can be changed
@@ -26,13 +25,13 @@ class GroupsViewModel(
 
     fun loadGroups() {
         viewModelScope.launch {
-            repository.getGroups()
+            getGroupsUseCase.execute()
                 .onSuccess { savedGroups ->
                     _uiState.update {
                         it.copy(isLoading = false, groups = savedGroups)
                     }
                 }
-                .onFailure { error ->
+                .onFailure {
                     _uiState.update {
                         it.copy(isLoading = false, groups = emptyList())
                     }

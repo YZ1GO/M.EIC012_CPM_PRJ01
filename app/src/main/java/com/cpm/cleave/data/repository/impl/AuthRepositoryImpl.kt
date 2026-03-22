@@ -1,21 +1,20 @@
 package com.cpm.cleave.data.repository.impl
 
-import com.cpm.cleave.data.local.Cache
-import com.cpm.cleave.data.repository.AnonymousLimits
-import com.cpm.cleave.data.repository.DEFAULT_ANONYMOUS_LIMITS
-import com.cpm.cleave.data.repository.contracts.IAuthRepository
+import com.cpm.cleave.data.local.AuthSessionStore
+import com.cpm.cleave.domain.repository.AnonymousLimits
+import com.cpm.cleave.domain.repository.DEFAULT_ANONYMOUS_LIMITS
+import com.cpm.cleave.domain.repository.contracts.IAuthRepository
 import com.cpm.cleave.model.User
 
 class AuthRepositoryImpl(
-    private val cache: Cache
+    private val authSessionStore: AuthSessionStore
 ) : IAuthRepository {
 
     override fun getAnonymousLimits(): AnonymousLimits = DEFAULT_ANONYMOUS_LIMITS
 
     override suspend fun getCurrentUser(): Result<User?> {
-        // TODO(auth-refactor): after auth/session exists, resolve generic active user (anonymous or registered).
         return try {
-            Result.success(cache.getActiveAnonymousUser())
+            Result.success(authSessionStore.getActiveUser())
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -23,25 +22,25 @@ class AuthRepositoryImpl(
 
     override suspend fun getOrCreateAnonymousUser(defaultName: String): Result<User> {
         return try {
-            Result.success(cache.getOrCreateAnonymousUser(defaultName))
+            Result.success(authSessionStore.getOrCreateUser(defaultName))
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
-    // TODO(remove-before-release): remove debug-only local user switch API.
+    // TODO: delete
     override suspend fun switchDebugAnonymousUser(defaultName: String): Result<User> {
         return try {
-            Result.success(cache.switchToNewDebugAnonymousUser(defaultName))
+            Result.success(authSessionStore.switchToNewDebugAnonymousUser(defaultName))
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
-    // TODO(remove-before-release): remove debug-only local database reset API.
+    // TODO: delete
     override suspend fun clearDebugDatabase(): Result<Unit> {
         return try {
-            cache.clearAllDebugData()
+            authSessionStore.clearAllDebugData()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

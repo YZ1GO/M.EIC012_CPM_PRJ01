@@ -40,14 +40,21 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.cpm.cleave.data.repository.contracts.IAuthRepository
-import com.cpm.cleave.data.repository.contracts.IExpenseRepository
-import com.cpm.cleave.data.repository.contracts.IGroupRepository
+import com.cpm.cleave.domain.repository.contracts.IAuthRepository
+import com.cpm.cleave.domain.repository.contracts.IExpenseRepository
+import com.cpm.cleave.domain.repository.contracts.IGroupRepository
+import com.cpm.cleave.domain.usecase.GetAddExpenseMembersUseCase
+import com.cpm.cleave.domain.usecase.GetGroupDetailsUseCase
+import com.cpm.cleave.domain.usecase.GetGroupsUseCase
+import com.cpm.cleave.domain.usecase.RequestCreateExpenseUseCase
+import com.cpm.cleave.domain.usecase.RequestCreateGroupUseCase
+import com.cpm.cleave.domain.usecase.RequestJoinGroupUseCase
 import com.cpm.cleave.ui.features.addexpense.AddExpenseScreen
 import com.cpm.cleave.ui.features.addexpense.AddExpenseViewModel
 import com.cpm.cleave.ui.features.creategroup.CreateGroupScreen
 import com.cpm.cleave.ui.features.creategroup.CreateGroupViewModel
 import com.cpm.cleave.ui.features.groups.GroupDetailsScreen
+import com.cpm.cleave.ui.features.groups.GroupDetailsViewModel
 import com.cpm.cleave.ui.features.groups.GroupsScreen
 import com.cpm.cleave.ui.features.groups.GroupsViewModel
 import com.cpm.cleave.ui.features.joingroup.JoinGroupScreen
@@ -118,7 +125,7 @@ fun MainScreen(
             composable(NavScreen.Groups.route) {
                 val groupsViewModel: GroupsViewModel = viewModel(
                     factory = viewModelFactory {
-                        initializer { GroupsViewModel(groupRepository) }
+                        initializer { GroupsViewModel(GetGroupsUseCase(groupRepository)) }
                     }
                 )
 
@@ -129,12 +136,14 @@ fun MainScreen(
                     }
                 )
             }
-            composable(NavScreen.Profile.route) { ProfileScreen(authRepository) }
+            composable(NavScreen.Profile.route) {
+                ProfileScreen(repository = authRepository)
+            }
 
             composable(NavScreen.CreateGroup.route) {
                 val createGroupViewModel: CreateGroupViewModel = viewModel(
                     factory = viewModelFactory {
-                        initializer { CreateGroupViewModel(groupRepository) }
+                        initializer { CreateGroupViewModel(RequestCreateGroupUseCase(groupRepository)) }
                     }
                 )
 
@@ -146,7 +155,7 @@ fun MainScreen(
             composable(NavScreen.JoinGroup.route) {
                 val joinGroupViewModel: JoinGroupViewModel = viewModel(
                     factory = viewModelFactory {
-                        initializer { JoinGroupViewModel(groupRepository) }
+                        initializer { JoinGroupViewModel(RequestJoinGroupUseCase(groupRepository)) }
                     }
                 )
 
@@ -160,10 +169,23 @@ fun MainScreen(
                 arguments = listOf(navArgument("groupId") { type = NavType.StringType })
             ) { backStackEntry ->
                 val groupId = backStackEntry.arguments?.getString("groupId") ?: return@composable
+                val groupDetailsViewModel: GroupDetailsViewModel = viewModel(
+                    key = "group_details_$groupId",
+                    factory = viewModelFactory {
+                        initializer {
+                            GroupDetailsViewModel(
+                                groupId = groupId,
+                                getGroupDetailsUseCase = GetGroupDetailsUseCase(
+                                    groupRepository = groupRepository,
+                                    expenseRepository = expenseRepository
+                                )
+                            )
+                        }
+                    }
+                )
+
                 GroupDetailsScreen(
-                    groupRepository = groupRepository,
-                    expenseRepository = expenseRepository,
-                    groupId = groupId,
+                    viewModel = groupDetailsViewModel,
                     onAddExpenseClick = { selectedGroupId ->
                         navController.navigate(NavScreen.AddExpense.createRoute(selectedGroupId))
                     }
@@ -179,8 +201,8 @@ fun MainScreen(
                     factory = viewModelFactory {
                         initializer {
                             AddExpenseViewModel(
-                                groupRepository = groupRepository,
-                                expenseRepository = expenseRepository,
+                                getAddExpenseMembersUseCase = GetAddExpenseMembersUseCase(groupRepository),
+                                requestCreateExpenseUseCase = RequestCreateExpenseUseCase(expenseRepository),
                                 groupId = groupId
                             )
                         }

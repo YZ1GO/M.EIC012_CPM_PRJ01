@@ -1,15 +1,20 @@
 package com.cpm.cleave.data.repository.impl
 
 import com.cpm.cleave.data.local.Cache
-import com.cpm.cleave.data.repository.contracts.IExpenseRepository
-import com.cpm.cleave.domain.debt.DebtCalculator
+import com.cpm.cleave.data.local.AuthSessionStore
+import com.cpm.cleave.domain.repository.contracts.IExpenseRepository
+import com.cpm.cleave.domain.usecase.CalculateDebtsUseCase
+import com.cpm.cleave.domain.usecase.CreateExpenseCommand
+import com.cpm.cleave.domain.usecase.CreateExpenseUseCase
 import com.cpm.cleave.model.Debt
 import com.cpm.cleave.model.Expense
 import java.util.UUID
 
 class ExpenseRepositoryImpl(
     private val cache: Cache,
-    private val debtCalculator: DebtCalculator = DebtCalculator()
+    private val authSessionStore: AuthSessionStore,
+    private val calculateDebtsUseCase: CalculateDebtsUseCase = CalculateDebtsUseCase(),
+    private val createExpenseUseCase: CreateExpenseUseCase = CreateExpenseUseCase()
 ) : IExpenseRepository {
 
     override suspend fun getExpensesByGroup(groupId: String): Result<List<Expense>> {
@@ -29,7 +34,7 @@ class ExpenseRepositoryImpl(
             }
 
             Result.success(
-                debtCalculator.calculateDebts(
+                calculateDebtsUseCase.execute(
                     groupMembers = group.members,
                     expenses = expenses,
                     sharesByExpenseId = sharesByExpenseId
@@ -49,30 +54,19 @@ class ExpenseRepositoryImpl(
     ): Result<Unit> {
         // TODO(expense-advanced): support multi-payer expenses by accepting payer contributions and validating sum == total.
         return try {
-            if (amount <= 0.0) {
-                return Result.failure(IllegalArgumentException("Expense amount must be greater than zero."))
-            }
-
-            if (splitMemberIds.isEmpty()) {
-                return Result.failure(IllegalArgumentException("Select at least one member to split with."))
-            }
-
-            val currentUser = cache.getActiveAnonymousUser()
-                ?: return Result.failure(IllegalStateException("No current user found."))
+            val currentUser = authSessionStore.getActiveUser()
             val group = cache.getGroupById(groupId)
-                ?: return Result.failure(IllegalArgumentException("Group not found."))
 
-            if (!group.members.contains(currentUser.id)) {
-                return Result.failure(IllegalStateException("Current user is not a member of this group."))
-            }
-
-            if (!group.members.contains(paidByUserId)) {
-                return Result.failure(IllegalArgumentException("Selected payer is not a member of this group."))
-            }
-
-            if (!splitMemberIds.all { group.members.contains(it) }) {
-                return Result.failure(IllegalArgumentException("All split members must belong to the group."))
-            }
+            val command = CreateExpenseCommand(
+                amount = amount,
+                paidByUserId = paidByUserId,
+                splitMemberIds = splitMemberIds
+            )
+            createExpenseUseCase.execute(
+                command = command,
+                currentUser = currentUser,
+                group = group
+            ).getOrElse { return Result.failure(it) }
 
             cache.insertExpenseWithSplit(
                 expenseId = UUID.randomUUID().toString(),

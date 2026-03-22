@@ -30,10 +30,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -45,12 +41,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.cpm.cleave.data.repository.contracts.IExpenseRepository
-import com.cpm.cleave.data.repository.contracts.IGroupRepository
-import com.cpm.cleave.model.Debt
-import com.cpm.cleave.model.Expense
 import com.cpm.cleave.model.Group
-import kotlinx.coroutines.launch
 
 @Composable
 fun GroupsScreen(groupsViewModel: GroupsViewModel, onGroupClick: (String) -> Unit) {
@@ -136,47 +127,18 @@ fun GroupListItem(group: Group, onClick: () -> Unit) {
 
 @Composable
 fun GroupDetailsScreen(
-    groupRepository: IGroupRepository,
-    expenseRepository: IExpenseRepository,
-    groupId: String,
+    viewModel: GroupDetailsViewModel,
     onAddExpenseClick: (String) -> Unit
 ) {
-    var group by remember { mutableStateOf<Group?>(null) }
-    var expenses by remember { mutableStateOf<List<Expense>>(emptyList()) }
-    var debts by remember { mutableStateOf<List<Debt>>(emptyList()) }
-    var loadError by remember { mutableStateOf<String?>(null) }
-    val coroutineScope = rememberCoroutineScope()
+    val uiState by viewModel.uiState.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    fun refreshGroupData() {
-        coroutineScope.launch {
-            groupRepository.getGroupById(groupId)
-                .onSuccess { group = it }
-                .onFailure { loadError = it.message ?: "Could not load group" }
+    LaunchedEffect(Unit) { viewModel.refreshGroupData() }
 
-            expenseRepository.getExpensesByGroup(groupId)
-                .onSuccess {
-                    expenses = it.sortedByDescending { expense -> expense.date }
-                }
-                .onFailure {
-                    loadError = it.message ?: "Could not load expenses" }
-
-            expenseRepository.getDebtsByGroup(groupId)
-                .onSuccess { debts = it }
-                .onFailure {
-                    loadError = it.message ?: "Could not calculate debts"
-                }
-        }
-    }
-
-    LaunchedEffect(groupId) {
-        refreshGroupData()
-    }
-
-    DisposableEffect(lifecycleOwner, groupId) {
+    DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                refreshGroupData()
+                viewModel.refreshGroupData()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -191,9 +153,9 @@ fun GroupDetailsScreen(
     ) {
         Text("Group Details", fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
 
-        loadError?.let { Text(it, color = Color.Red) }
+        uiState.errorMessage?.let { Text(it, color = Color.Red) }
 
-        val currentGroup = group
+        val currentGroup = uiState.group
         if (currentGroup == null) {
             Text("Loading group...")
             return@Column
@@ -214,12 +176,12 @@ fun GroupDetailsScreen(
         }
 
         Spacer(modifier = Modifier.height(8.dp))
-        Text("Expenses (${expenses.size})", fontWeight = FontWeight.Medium)
+        Text("Expenses (${uiState.expenses.size})", fontWeight = FontWeight.Medium)
 
-        if (expenses.isEmpty()) {
+        if (uiState.expenses.isEmpty()) {
             Text("No expenses yet.")
         } else {
-            expenses.forEach { expense ->
+            uiState.expenses.forEach { expense ->
                 val desc = expense.description.ifBlank { "(No description)" }
                 Text(
                     text = "- $desc: ${expense.amount} (${expense.paidByUserId})",
@@ -229,12 +191,12 @@ fun GroupDetailsScreen(
         }
 
         Spacer(modifier = Modifier.height(8.dp))
-        Text("Debts (${debts.size})", fontWeight = FontWeight.Medium)
+        Text("Debts (${uiState.debts.size})", fontWeight = FontWeight.Medium)
 
-        if (debts.isEmpty()) {
+        if (uiState.debts.isEmpty()) {
             Text("No debts yet.")
         } else {
-            debts.forEach { debt ->
+            uiState.debts.forEach { debt ->
                 Text(
                     text = "- ${debt.fromUser} owes ${debt.toUser}: ${debt.amount}",
                     color = Color.Gray

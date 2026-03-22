@@ -1,4 +1,4 @@
-package com.cpm.cleave.domain.debt
+package com.cpm.cleave.domain
 
 import com.cpm.cleave.model.Debt
 import com.cpm.cleave.model.Expense

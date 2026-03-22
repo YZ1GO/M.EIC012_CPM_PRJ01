@@ -24,7 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.cpm.cleave.data.repository.contracts.IAuthRepository
+import com.cpm.cleave.domain.repository.contracts.IAuthRepository
 import com.cpm.cleave.model.User
 import kotlinx.coroutines.launch
 
@@ -34,8 +34,6 @@ fun ProfileScreen(repository: IAuthRepository) {
     var loadError by remember { mutableStateOf<String?>(null) }
     val limits = remember { repository.getAnonymousLimits() }
     val coroutineScope = rememberCoroutineScope()
-
-    // TODO(remove-before-release): remove debug user-switch tools from profile UI.
     val isDebuggable = (LocalContext.current.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
     LaunchedEffect(Unit) {
@@ -72,7 +70,7 @@ fun ProfileScreen(repository: IAuthRepository) {
             Text("- Max groups: ${limits.maxGroups}")
             Text("- Max total debt: ${limits.maxTotalDebt}")
 
-            // TODO(remove-before-release): remove debug user-switch tools from profile UI.
+            // TODO: delete
             if (isDebuggable) {
                 Spacer(modifier = Modifier.height(16.dp))
                 Text("Debug tools", fontWeight = FontWeight.Medium)
@@ -100,7 +98,6 @@ fun ProfileScreen(repository: IAuthRepository) {
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // TODO(remove-before-release): remove debug room database reset button.
                 Button(
                     onClick = {
                         coroutineScope.launch {

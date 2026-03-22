@@ -1,34 +1,31 @@
 package com.cpm.cleave.data.repository.impl
 
 import com.cpm.cleave.data.local.Cache
-import com.cpm.cleave.data.repository.AnonymousLimits
-import com.cpm.cleave.data.repository.DEFAULT_ANONYMOUS_LIMITS
-import com.cpm.cleave.data.repository.contracts.IGroupRepository
+import com.cpm.cleave.data.local.AuthSessionStore
+import com.cpm.cleave.domain.repository.AnonymousLimits
+import com.cpm.cleave.domain.repository.DEFAULT_ANONYMOUS_LIMITS
+import com.cpm.cleave.domain.repository.contracts.IGroupRepository
+import com.cpm.cleave.domain.usecase.JoinGroupUseCase
+import com.cpm.cleave.domain.usecase.PrepareGroupCreationCommand
+import com.cpm.cleave.domain.usecase.PrepareGroupCreationUseCase
 import com.cpm.cleave.model.Group
-import java.util.UUID
 
 class GroupRepositoryImpl(
     private val cache: Cache,
-    private val anonymousLimits: AnonymousLimits = DEFAULT_ANONYMOUS_LIMITS
+    private val authSessionStore: AuthSessionStore,
+    private val anonymousLimits: AnonymousLimits = DEFAULT_ANONYMOUS_LIMITS,
+    private val prepareGroupCreationUseCase: PrepareGroupCreationUseCase = PrepareGroupCreationUseCase(),
+    private val joinGroupUseCase: JoinGroupUseCase = JoinGroupUseCase(anonymousLimits)
 ) : IGroupRepository {
 
     override suspend fun createGroup(name: String, currency: String): Result<Group> {
         return try {
-            val anonymousUser = cache.getActiveAnonymousUser()
-            if (anonymousUser != null && anonymousUser.groups.size >= anonymousLimits.maxGroups) {
-                return Result.failure(
-                    IllegalStateException("Anonymous users can belong to only 1 group.")
-                )
-            }
-
-            val newGroup = Group(
-                id = UUID.randomUUID().toString(),
-                name = name,
-                currency = currency,
-                members = anonymousUser?.let { listOf(it.id) } ?: emptyList(),
-                joinCode = (1000..9999).random().toString(), // TODO CHANGE TO HASH
-                balances = emptyMap()
-            )
+            val anonymousUser = authSessionStore.getActiveUser()
+            val newGroup = prepareGroupCreationUseCase.execute(
+                command = PrepareGroupCreationCommand(name = name, currency = currency),
+                currentUser = anonymousUser,
+                anonymousLimits = anonymousLimits
+            ).getOrElse { return Result.failure(it) }
 
             cache.insertGroup(newGroup)
             anonymousUser?.let {
@@ -43,7 +40,12 @@ class GroupRepositoryImpl(
 
     override suspend fun getGroups(): Result<List<Group>> {
         return try {
-            Result.success(cache.loadGroups())
+            val currentUser = authSessionStore.getActiveUser()
+            if (currentUser == null) {
+                return Result.success(emptyList())
+            }
+
+            Result.success(cache.loadGroups(currentUser.id))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -60,22 +62,19 @@ class GroupRepositoryImpl(
     override suspend fun joinGroupByCode(joinCode: String): Result<Group> {
         return try {
             val group = cache.getGroupByJoinCode(joinCode)
-                ?: return Result.failure(IllegalArgumentException("Invalid group code."))
+            val currentUser = authSessionStore.getActiveUser()
 
-            val currentUser = cache.getActiveAnonymousUser()
-                ?: return Result.failure(IllegalStateException("No current user found."))
+            joinGroupUseCase.execute(group = group, currentUser = currentUser)
+                .getOrElse { return Result.failure(it) }
 
-            if (currentUser.isAnonymous && currentUser.groups.size >= anonymousLimits.maxGroups) {
-                return Result.failure(
-                    IllegalStateException("Anonymous users can belong to only 1 group.")
-                )
+            val resolvedGroup = group ?: return Result.failure(IllegalArgumentException("Invalid group code."))
+            val resolvedUser = currentUser ?: return Result.failure(IllegalStateException("No current user found."))
+
+            if (!cache.isUserInGroup(resolvedGroup.id, resolvedUser.id)) {
+                cache.addUserToGroup(resolvedGroup.id, resolvedUser.id)
             }
 
-            if (!cache.isUserInGroup(group.id, currentUser.id)) {
-                cache.addUserToGroup(group.id, currentUser.id)
-            }
-
-            val updatedGroup = cache.getGroupById(group.id) ?: group
+            val updatedGroup = cache.getGroupById(resolvedGroup.id) ?: resolvedGroup
             Result.success(updatedGroup)
         } catch (e: Exception) {
             Result.failure(e)

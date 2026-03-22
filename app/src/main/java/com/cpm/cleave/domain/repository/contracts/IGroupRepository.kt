@@ -1,4 +1,4 @@
-package com.cpm.cleave.data.repository.contracts
+package com.cpm.cleave.domain.repository.contracts
 
 import com.cpm.cleave.model.Group
 

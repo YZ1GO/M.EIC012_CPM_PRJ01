@@ -1,4 +1,4 @@
-package com.cpm.cleave.data.repository
+package com.cpm.cleave.domain.repository
 
 data class AnonymousLimits(
     val maxGroups: Int = 1,

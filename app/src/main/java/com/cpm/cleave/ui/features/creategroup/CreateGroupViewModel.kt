@@ -2,7 +2,7 @@ package com.cpm.cleave.ui.features.creategroup
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.cpm.cleave.data.repository.contracts.IGroupRepository
+import com.cpm.cleave.domain.usecase.RequestCreateGroupUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class CreateGroupViewModel (
-    private val repository: IGroupRepository
+    private val requestCreateGroupUseCase: RequestCreateGroupUseCase
 ) : ViewModel() {
 
     // The internal state that can be changed
@@ -32,7 +32,7 @@ class CreateGroupViewModel (
         if (state.Name.isBlank()) return
 
         viewModelScope.launch {
-            val result = repository.createGroup(state.Name, state.Currency)
+            val result = requestCreateGroupUseCase.execute(state.Name, state.Currency)
             if (result.isSuccess) {
                 onSuccess()
             } else {
