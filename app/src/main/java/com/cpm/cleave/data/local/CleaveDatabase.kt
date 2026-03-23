@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import com.cpm.cleave.BuildConfig
 import com.cpm.cleave.data.local.daos.DebtDao
 import com.cpm.cleave.data.local.daos.ExpenseDao
 import com.cpm.cleave.data.local.daos.ExpenseSplitDao
@@ -29,7 +30,7 @@ import com.cpm.cleave.data.local.entities.UserEntity
         DebtEntity::class,
         PaymentEntity::class
     ],
-    version = 2,
+    version = 1,
     exportSchema = false
 )
 abstract class CleaveDatabase : RoomDatabase() {
@@ -47,13 +48,17 @@ abstract class CleaveDatabase : RoomDatabase() {
 
         fun getDatabase(context: Context): CleaveDatabase {
             return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
+                val builder = Room.databaseBuilder(
                     context.applicationContext,
                     CleaveDatabase::class.java,
                     "cleave_database"
                 )
-                    .fallbackToDestructiveMigration(dropAllTables = true)
-                    .build()
+
+                if (BuildConfig.DEBUG) {
+                    builder.fallbackToDestructiveMigration(dropAllTables = true)
+                }
+
+                val instance = builder.build()
                 INSTANCE = instance
                 instance
             }
