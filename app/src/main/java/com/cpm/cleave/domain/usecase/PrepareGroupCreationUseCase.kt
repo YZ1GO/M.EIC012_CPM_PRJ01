@@ -21,7 +21,7 @@ class PrepareGroupCreationUseCase {
             return Result.failure(IllegalArgumentException("Group name is required."))
         }
 
-        if (currentUser != null && currentUser.groups.size >= anonymousLimits.maxGroups) {
+        if (currentUser?.isAnonymous == true && currentUser.groups.size >= anonymousLimits.maxGroups) {
             return Result.failure(IllegalStateException("Anonymous users can belong to only 1 group."))
         }
 
