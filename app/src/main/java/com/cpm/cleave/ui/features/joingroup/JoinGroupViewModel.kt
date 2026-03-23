@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 class JoinGroupViewModel(
     private val requestJoinGroupUseCase: RequestJoinGroupUseCase
@@ -17,7 +18,10 @@ class JoinGroupViewModel(
     val uiState: StateFlow<JoinGroupUiState> = _uiState.asStateFlow()
 
     fun onJoinCodeChanged(newCode: String) {
-        _uiState.update { it.copy(joinCode = newCode, errorMessage = null) }
+        val normalized = newCode
+            .filterNot { it.isWhitespace() }
+            .uppercase(Locale.ROOT)
+        _uiState.update { it.copy(joinCode = normalized, errorMessage = null) }
     }
 
     fun joinGroup(onSuccess: () -> Unit) {

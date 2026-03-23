@@ -15,9 +15,19 @@ import com.cpm.cleave.model.ExpenseShare
 import com.cpm.cleave.model.Group
 import com.google.android.gms.tasks.Task
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.Locale
 import kotlin.coroutines.resume
 
 class GroupRepositoryImpl(
@@ -30,6 +40,95 @@ class GroupRepositoryImpl(
     private val joinGroupUseCase: JoinGroupUseCase = JoinGroupUseCase(anonymousLimits),
     private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
 ) : IGroupRepository {
+
+    override fun observeGroups(): Flow<List<Group>> = callbackFlow {
+        val currentUser = authSessionStore.getActiveUser()
+        if (currentUser == null) {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+
+        val userId = currentUser.id
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val groupDocRegistrations = mutableMapOf<String, ListenerRegistration>()
+        val memberDocRegistrations = mutableMapOf<String, ListenerRegistration>()
+        val membersCollectionRegistrations = mutableMapOf<String, ListenerRegistration>()
+
+        suspend fun refreshAndEmit() {
+            val refreshed = getGroups().getOrElse { cache.loadGroups(userId) }
+            trySend(refreshed)
+
+            val refreshedIds = refreshed.map { it.id }.toSet()
+
+            groupDocRegistrations
+                .filterKeys { it !in refreshedIds }
+                .values
+                .forEach { it.remove() }
+            memberDocRegistrations
+                .filterKeys { it !in refreshedIds }
+                .values
+                .forEach { it.remove() }
+            membersCollectionRegistrations
+                .filterKeys { it !in refreshedIds }
+                .values
+                .forEach { it.remove() }
+
+            groupDocRegistrations.keys.removeAll { it !in refreshedIds }
+            memberDocRegistrations.keys.removeAll { it !in refreshedIds }
+            membersCollectionRegistrations.keys.removeAll { it !in refreshedIds }
+
+            refreshedIds.forEach { groupId ->
+                if (!groupDocRegistrations.containsKey(groupId)) {
+                    groupDocRegistrations[groupId] = firestore.collection("groups")
+                        .document(groupId)
+                        .addSnapshotListener { _, _ ->
+                            scope.launch { refreshAndEmit() }
+                        }
+                }
+
+                if (!memberDocRegistrations.containsKey(groupId)) {
+                    memberDocRegistrations[groupId] = firestore.collection("groups")
+                        .document(groupId)
+                        .collection("members")
+                        .document(userId)
+                        .addSnapshotListener { _, _ ->
+                            scope.launch { refreshAndEmit() }
+                        }
+                }
+
+                if (!membersCollectionRegistrations.containsKey(groupId)) {
+                    membersCollectionRegistrations[groupId] = firestore.collection("groups")
+                        .document(groupId)
+                        .collection("members")
+                        .addSnapshotListener { _, _ ->
+                            scope.launch { refreshAndEmit() }
+                        }
+                }
+            }
+        }
+
+        scope.launch {
+            trySend(cache.loadGroups(userId))
+            refreshAndEmit()
+        }
+
+        val membershipRegistration = firestore.collectionGroup("members")
+            .whereEqualTo("userId", userId)
+            .addSnapshotListener { _, _ ->
+                scope.launch {
+                    refreshAndEmit()
+                }
+            }
+
+        awaitClose {
+            membershipRegistration.remove()
+            groupDocRegistrations.values.forEach { it.remove() }
+            memberDocRegistrations.values.forEach { it.remove() }
+            membersCollectionRegistrations.values.forEach { it.remove() }
+            scope.cancel()
+        }
+    }
 
     override suspend fun createGroup(name: String, currency: String): Result<Group> {
         return try {
@@ -141,7 +240,10 @@ class GroupRepositoryImpl(
 
             val remoteResult = runCatching {
                 val remoteGroups = withTimeoutOrNull(4000L) {
-                    fetchGroupsFromRemote(currentUser.id)
+                    fetchGroupsFromRemote(
+                        userId = currentUser.id,
+                        knownLocalGroupIds = localGroups.map { it.id }
+                    )
                 } ?: throw IllegalStateException("Remote groups fetch timed out")
 
                 remoteGroups.forEach { cache.upsertGroupWithMembers(it) }
@@ -151,8 +253,16 @@ class GroupRepositoryImpl(
                 val remoteGroupIds = remoteGroups.map { it.id }.toSet()
                 localGroups.forEach { localGroup ->
                     if (localGroup.id !in remoteGroupIds) {
-                        pendingSyncStore.removePendingGroupSync(localGroup.id)
-                        cache.deleteGroupById(localGroup.id)
+                        val isMemberRemotely = runCatching {
+                            withTimeoutOrNull(1500L) {
+                                remoteGroupHasMember(localGroup.id, currentUser.id)
+                            }
+                        }.getOrNull()
+
+                        if (isMemberRemotely == false) {
+                            pendingSyncStore.removePendingGroupSync(localGroup.id)
+                            cache.deleteGroupById(localGroup.id)
+                        }
                     }
                 }
 
@@ -175,6 +285,16 @@ class GroupRepositoryImpl(
     private suspend fun remoteGroupExists(groupId: String): Boolean {
         return firestore.collection("groups")
             .document(groupId)
+            .get()
+            .awaitTaskResult()
+            .exists()
+    }
+
+    private suspend fun remoteGroupHasMember(groupId: String, userId: String): Boolean {
+        return firestore.collection("groups")
+            .document(groupId)
+            .collection("members")
+            .document(userId)
             .get()
             .awaitTaskResult()
             .exists()
@@ -221,43 +341,70 @@ class GroupRepositoryImpl(
 
     override suspend fun joinGroupByCode(joinCode: String): Result<Group> {
         return try {
-            val group = cache.getGroupByJoinCode(joinCode)
-            val currentUser = authSessionStore.getActiveUser()
+            if (!connectivityStatus.isNetworkAvailable()) {
+                return Result.failure(
+                    IllegalStateException("Joining a group requires an internet connection.")
+                )
+            }
 
-            joinGroupUseCase.execute(group = group, currentUser = currentUser)
+            val normalizedJoinCode = joinCode.trim().uppercase(Locale.ROOT)
+            val currentUser = authSessionStore.getActiveUser()
+            val resolvedGroup = withTimeoutOrNull(3000L) {
+                fetchGroupByJoinCodeFromRemote(normalizedJoinCode)
+            }
+
+            if (resolvedGroup != null) {
+                cache.upsertGroupWithMembers(resolvedGroup)
+            }
+
+            joinGroupUseCase.execute(group = resolvedGroup, currentUser = currentUser)
                 .getOrElse { return Result.failure(it) }
 
-            val resolvedGroup = group ?: return Result.failure(IllegalArgumentException("Invalid group code."))
+            val joinedGroup = resolvedGroup ?: return Result.failure(IllegalArgumentException("Invalid group code."))
             val resolvedUser = currentUser ?: return Result.failure(IllegalStateException("No current user found."))
 
-            if (!cache.isUserInGroup(resolvedGroup.id, resolvedUser.id)) {
-                cache.addUserToGroup(resolvedGroup.id, resolvedUser.id)
-            }
-
-            val updatedGroup = cache.getGroupById(resolvedGroup.id) ?: resolvedGroup
-            if (!connectivityStatus.isNetworkAvailable()) {
-                pendingSyncStore.addPendingGroupSync(updatedGroup.id)
-                return Result.success(updatedGroup)
-            }
-
-            try {
-                val synced = withTimeoutOrNull(1000L) {
-                    syncGroupToRemote(updatedGroup)
+            val remoteJoinSucceeded = runCatching {
+                withTimeoutOrNull(6000L) {
+                    syncGroupMembershipToRemote(groupId = joinedGroup.id, userId = resolvedUser.id)
                     true
                 } ?: false
+            }.getOrDefault(false)
 
-                if (!synced) {
-                    pendingSyncStore.addPendingGroupSync(updatedGroup.id)
-                    return Result.success(updatedGroup)
-                }
-                pendingSyncStore.removePendingGroupSync(updatedGroup.id)
-            } catch (_: Exception) {
-                pendingSyncStore.addPendingGroupSync(updatedGroup.id)
+            if (!remoteJoinSucceeded) {
+                return Result.failure(
+                    IllegalStateException("Could not join group right now. Please try again.")
+                )
             }
-            Result.success(updatedGroup)
+
+            val refreshedRemoteGroup = withTimeoutOrNull(3000L) {
+                fetchSingleGroupFromRemote(joinedGroup.id)
+            }
+
+            val mergedGroup = refreshedRemoteGroup?.copy(
+                members = (refreshedRemoteGroup.members + resolvedUser.id).distinct()
+            ) ?: joinedGroup.copy(
+                members = (joinedGroup.members + resolvedUser.id).distinct()
+            )
+
+            cache.upsertGroupWithMembers(mergedGroup)
+            pendingSyncStore.removePendingGroupSync(mergedGroup.id)
+
+            Result.success(cache.getGroupById(mergedGroup.id) ?: mergedGroup)
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    private suspend fun fetchGroupByJoinCodeFromRemote(joinCode: String): Group? {
+        val mappedGroupId = runCatching {
+            firestore.collection("group_join_codes")
+                .document(joinCode)
+                .get()
+                .awaitTaskResult()
+                .getString("groupId")
+        }.getOrNull()
+
+        return mappedGroupId?.let { fetchSingleGroupFromRemote(it) }
     }
 
     private suspend fun flushPendingGroupSyncs() {
@@ -282,7 +429,7 @@ class GroupRepositoryImpl(
             }
 
             try {
-                val synced = withTimeoutOrNull(1000L) {
+                val synced = withTimeoutOrNull(4000L) {
                     syncGroupToRemote(localGroup)
                     true
                 } ?: false
@@ -312,7 +459,10 @@ class GroupRepositoryImpl(
         }
     }
 
-    private suspend fun fetchGroupsFromRemote(userId: String): List<Group> {
+    private suspend fun fetchGroupsFromRemote(
+        userId: String,
+        knownLocalGroupIds: List<String> = emptyList()
+    ): List<Group> {
         val membershipSnapshot = firestore.collectionGroup("members")
             .whereEqualTo("userId", userId)
             .get()
@@ -322,24 +472,10 @@ class GroupRepositoryImpl(
             .mapNotNull { document -> document.reference.parent.parent?.id }
             .toMutableSet()
 
-        // Fallback for older/inconsistent remote data where member docs may not include userId field.
-        if (discoveredGroupIds.isEmpty()) {
-            val allGroups = firestore.collection("groups")
-                .get()
-                .awaitTaskResult()
-
-            for (groupDoc in allGroups.documents) {
-                val hasMembership = firestore.collection("groups")
-                    .document(groupDoc.id)
-                    .collection("members")
-                    .document(userId)
-                    .get()
-                    .awaitTaskResult()
-                    .exists()
-
-                if (hasMembership) {
-                    discoveredGroupIds.add(groupDoc.id)
-                }
+        // Reconcile known local groups via direct membership doc checks.
+        knownLocalGroupIds.forEach { groupId ->
+            if (groupId !in discoveredGroupIds && remoteGroupHasMember(groupId, userId)) {
+                discoveredGroupIds.add(groupId)
             }
         }
 
@@ -448,7 +584,14 @@ class GroupRepositoryImpl(
     private suspend fun syncGroupToRemote(group: Group) {
         val now = System.currentTimeMillis()
         val groupRef = firestore.collection("groups").document(group.id)
-        groupRef.set(
+        val membersCollection = groupRef.collection("members")
+        val incomingMembers = group.members.toSet()
+
+        val existingMembersSnapshot = membersCollection.get().awaitTaskResult()
+        val batch = firestore.batch()
+
+        batch.set(
+            groupRef,
             mapOf(
                 "name" to group.name,
                 "currency" to group.currency,
@@ -456,19 +599,43 @@ class GroupRepositoryImpl(
                 "updatedAt" to now
             ),
             SetOptions.merge()
-        ).awaitTaskResult()
+        )
 
-        group.members.forEach { memberId ->
-            groupRef.collection("members").document(memberId)
-                .set(
-                    mapOf(
-                        "userId" to memberId,
-                        "updatedAt" to now
-                    ),
-                    SetOptions.merge()
-                )
-                .awaitTaskResult()
+        existingMembersSnapshot.documents.forEach { memberDoc ->
+            val existingUserId = memberDoc.getString("userId") ?: memberDoc.id
+            if (existingUserId !in incomingMembers) {
+                batch.delete(memberDoc.reference)
+            }
         }
+
+        incomingMembers.forEach { memberId ->
+            batch.set(
+                membersCollection.document(memberId),
+                mapOf(
+                    "userId" to memberId,
+                    "updatedAt" to now
+                ),
+                SetOptions.merge()
+            )
+        }
+
+        batch.commit().awaitTaskResult()
+    }
+
+    private suspend fun syncGroupMembershipToRemote(groupId: String, userId: String) {
+        val now = System.currentTimeMillis()
+        firestore.collection("groups")
+            .document(groupId)
+            .collection("members")
+            .document(userId)
+            .set(
+                mapOf(
+                    "userId" to userId,
+                    "updatedAt" to now
+                ),
+                SetOptions.merge()
+            )
+            .awaitTaskResult()
     }
 
     private suspend fun <T> Task<T>.awaitTaskResult(): T {

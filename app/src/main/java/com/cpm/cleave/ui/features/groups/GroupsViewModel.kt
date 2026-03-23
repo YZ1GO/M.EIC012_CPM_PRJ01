@@ -3,6 +3,7 @@ package com.cpm.cleave.ui.features.groups
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cpm.cleave.domain.usecase.GetGroupsUseCase
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,7 +21,31 @@ class GroupsViewModel(
     val uiState: StateFlow<GroupsUiState> = _uiState.asStateFlow()
 
     init {
+        observeGroups()
         loadGroups()
+    }
+
+    private fun observeGroups() {
+        viewModelScope.launch {
+            getGroupsUseCase.observe()
+                .catch { error ->
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = error.message ?: "Could not load groups"
+                        )
+                    }
+                }
+                .collect { observedGroups ->
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            groups = observedGroups,
+                            errorMessage = null
+                        )
+                    }
+                }
+        }
     }
 
     fun loadGroups() {

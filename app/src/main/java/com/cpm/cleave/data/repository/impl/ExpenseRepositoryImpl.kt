@@ -13,7 +13,18 @@ import com.cpm.cleave.model.Expense
 import com.cpm.cleave.model.ExpenseShare
 import com.google.android.gms.tasks.Task
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
@@ -28,6 +39,70 @@ class ExpenseRepositoryImpl(
     private val createExpenseUseCase: CreateExpenseUseCase = CreateExpenseUseCase(),
     private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
 ) : IExpenseRepository {
+
+    private val localExpenseRefreshEvents = MutableSharedFlow<String>(extraBufferCapacity = 64)
+
+    override fun observeExpensesByGroup(groupId: String): Flow<List<Expense>> = callbackFlow {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val splitRegistrations = mutableMapOf<String, ListenerRegistration>()
+
+        suspend fun refreshAndEmit() {
+            val refreshedExpenses = getExpensesByGroup(groupId)
+                .getOrElse { cache.getExpensesByGroup(groupId) }
+                .sortedByDescending { it.date }
+
+            trySend(refreshedExpenses)
+
+            val expenseIds = refreshedExpenses.map { it.id }.toSet()
+            splitRegistrations
+                .filterKeys { it !in expenseIds }
+                .values
+                .forEach { it.remove() }
+            splitRegistrations.keys.removeAll { it !in expenseIds }
+
+            expenseIds.forEach { expenseId ->
+                if (!splitRegistrations.containsKey(expenseId)) {
+                    splitRegistrations[expenseId] = firestore.collection("groups")
+                        .document(groupId)
+                        .collection("expenses")
+                        .document(expenseId)
+                        .collection("splits")
+                        .addSnapshotListener { _, _ ->
+                            scope.launch { refreshAndEmit() }
+                        }
+                }
+            }
+        }
+
+        scope.launch {
+            trySend(cache.getExpensesByGroup(groupId).sortedByDescending { it.date })
+            refreshAndEmit()
+        }
+
+        val expensesRegistration = firestore.collection("groups")
+            .document(groupId)
+            .collection("expenses")
+            .addSnapshotListener { _, _ ->
+                scope.launch {
+                    refreshAndEmit()
+                }
+            }
+
+        val localRefreshJob = scope.launch {
+            localExpenseRefreshEvents.collect { changedGroupId ->
+                if (changedGroupId == groupId) {
+                    refreshAndEmit()
+                }
+            }
+        }
+
+        awaitClose {
+            expensesRegistration.remove()
+            localRefreshJob.cancel()
+            splitRegistrations.values.forEach { it.remove() }
+            scope.cancel()
+        }
+    }
 
     override suspend fun getExpensesByGroup(groupId: String): Result<List<Expense>> {
         return try {
@@ -70,9 +145,20 @@ class ExpenseRepositoryImpl(
                 expense.id to cache.getExpenseSharesForExpense(expense.id)
             }
 
+            // Remote member snapshots can briefly be incomplete during sync;
+            // include all participants seen in expenses/splits to keep debts stable.
+            val participantIds = mutableSetOf<String>()
+            participantIds.addAll(group.members)
+            expenses.forEach { expense ->
+                participantIds.add(expense.paidByUserId)
+                sharesByExpenseId[expense.id].orEmpty().forEach { share ->
+                    participantIds.add(share.userId)
+                }
+            }
+
             Result.success(
                 calculateDebtsUseCase.execute(
-                    groupMembers = group.members,
+                    groupMembers = participantIds.toList(),
                     expenses = expenses,
                     sharesByExpenseId = sharesByExpenseId
                 )
@@ -118,13 +204,15 @@ class ExpenseRepositoryImpl(
                 memberIds = splitMemberIds
             )
 
+            localExpenseRefreshEvents.tryEmit(groupId)
+
             if (!connectivityStatus.isNetworkAvailable()) {
                 pendingSyncStore.addPendingExpenseSync(groupId, expenseId)
                 return Result.success(Unit)
             }
 
             val syncSucceeded = runCatching {
-                withTimeoutOrNull(1500L) {
+                withTimeoutOrNull(4000L) {
                     syncExpenseToRemote(
                         expenseId = expenseId,
                         groupId = groupId,
@@ -161,7 +249,7 @@ class ExpenseRepositoryImpl(
             val shares = cache.getExpenseSharesForExpense(localExpense.id)
 
             val syncSucceeded = runCatching {
-                withTimeoutOrNull(1000L) {
+                withTimeoutOrNull(4000L) {
                     syncExpenseToRemote(
                         expenseId = localExpense.id,
                         groupId = pending.groupId,
@@ -237,7 +325,9 @@ class ExpenseRepositoryImpl(
         val groupRef = firestore.collection("groups").document(groupId)
         val expenseRef = groupRef.collection("expenses").document(expenseId)
 
-        expenseRef.set(
+        val batch = firestore.batch()
+        batch.set(
+            expenseRef,
             mapOf(
                 "amount" to amount,
                 "description" to description,
@@ -247,13 +337,14 @@ class ExpenseRepositoryImpl(
                 "updatedAt" to now
             ),
             SetOptions.merge()
-        ).awaitTaskResult()
+        )
 
-        if (splitMemberIds.isEmpty()) return
-        val splitAmount = amount / splitMemberIds.size
-        splitMemberIds.forEach { memberId ->
-            expenseRef.collection("splits").document(memberId)
-                .set(
+        if (splitMemberIds.isNotEmpty()) {
+            val splitAmount = amount / splitMemberIds.size
+            splitMemberIds.forEach { memberId ->
+                val splitRef = expenseRef.collection("splits").document(memberId)
+                batch.set(
+                    splitRef,
                     mapOf(
                         "userId" to memberId,
                         "amount" to splitAmount,
@@ -261,8 +352,10 @@ class ExpenseRepositoryImpl(
                     ),
                     SetOptions.merge()
                 )
-                .awaitTaskResult()
+            }
         }
+
+        batch.commit().awaitTaskResult()
     }
 
     private suspend fun <T> Task<T>.awaitTaskResult(): T {

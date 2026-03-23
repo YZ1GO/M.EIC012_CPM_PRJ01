@@ -104,7 +104,16 @@ class Cache(context: Context) {
                 )
             )
 
-            group.members.forEach { memberId ->
+            val incomingMembers = group.members.toSet()
+            val existingMembers = groupMemberDao.getMembersOfGroup(group.id)
+
+            existingMembers
+                .filter { it.userId !in incomingMembers }
+                .forEach { staleMember ->
+                    groupMemberDao.removeMember(staleMember)
+                }
+
+            incomingMembers.forEach { memberId ->
                 ensureUserExists(memberId)
                 groupMemberDao.addMember(
                     GroupMemberEntity(
@@ -190,17 +199,32 @@ class Cache(context: Context) {
                     )
                 )
 
-                expenseSplitDao.deleteSplitsForExpense(expense.id)
+                val incomingShares = sharesByExpenseId[expense.id].orEmpty()
+                val existingShares = expenseSplitDao.getSplitsForExpense(expense.id)
+                if (incomingShares.isNotEmpty()) {
+                    val shouldReplaceSplits = existingShares.isEmpty() || incomingShares.size >= existingShares.size
+                    if (shouldReplaceSplits) {
+                        expenseSplitDao.deleteSplitsForExpense(expense.id)
 
-                sharesByExpenseId[expense.id].orEmpty().forEach { share ->
-                    ensureUserExists(share.userId)
-                    expenseSplitDao.insertSplit(
-                        ExpenseSplitEntity(
-                            expenseId = expense.id,
-                            userId = share.userId,
-                            amount = share.amount
-                        )
-                    )
+                        incomingShares.forEach { share ->
+                            ensureUserExists(share.userId)
+                            expenseSplitDao.insertSplit(
+                                ExpenseSplitEntity(
+                                    expenseId = expense.id,
+                                    userId = share.userId,
+                                    amount = share.amount
+                                )
+                            )
+                        }
+                    }
+                } else {
+                    val hasExistingSplits = existingShares.isNotEmpty()
+                    if (!hasExistingSplits) {
+                        // If we have never seen splits for this expense, keep it explicitly empty.
+                        expenseSplitDao.deleteSplitsForExpense(expense.id)
+                    }
+                    // Otherwise keep existing local splits to avoid transient remote empty snapshots
+                    // causing debts to collapse to zero.
                 }
             }
         }

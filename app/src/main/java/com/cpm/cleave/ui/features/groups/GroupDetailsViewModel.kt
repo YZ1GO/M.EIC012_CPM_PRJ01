@@ -3,6 +3,7 @@ package com.cpm.cleave.ui.features.groups
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cpm.cleave.domain.usecase.GetGroupDetailsUseCase
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,7 +19,43 @@ class GroupDetailsViewModel(
     val uiState: StateFlow<GroupDetailsUiState> = _uiState.asStateFlow()
 
     init {
-        refreshGroupData()
+        observeGroupData()
+    }
+
+    private fun observeGroupData() {
+        viewModelScope.launch {
+            getGroupDetailsUseCase.observe(groupId)
+                .catch { error ->
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = error.message ?: "Could not load group details"
+                        )
+                    }
+                }
+                .collect { result ->
+                    result
+                        .onSuccess { data ->
+                            _uiState.update {
+                                it.copy(
+                                    isLoading = false,
+                                    group = data.group,
+                                    expenses = data.expenses,
+                                    debts = data.debts,
+                                    errorMessage = null
+                                )
+                            }
+                        }
+                        .onFailure { error ->
+                            _uiState.update {
+                                it.copy(
+                                    isLoading = false,
+                                    errorMessage = error.message ?: "Could not load group details"
+                                )
+                            }
+                        }
+                }
+        }
     }
 
     fun refreshGroupData() {
