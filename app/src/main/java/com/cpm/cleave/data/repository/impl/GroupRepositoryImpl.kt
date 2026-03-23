@@ -33,42 +33,95 @@ class GroupRepositoryImpl(
 
     override suspend fun createGroup(name: String, currency: String): Result<Group> {
         return try {
+            if (!connectivityStatus.isNetworkAvailable()) {
+                return Result.failure(
+                    IllegalStateException("Creating a group requires an internet connection.")
+                )
+            }
+
             val anonymousUser = authSessionStore.getActiveUser()
-            val newGroup = prepareGroupCreationUseCase.execute(
-                command = PrepareGroupCreationCommand(name = name, currency = currency),
-                currentUser = anonymousUser,
-                anonymousLimits = anonymousLimits
-            ).getOrElse { return Result.failure(it) }
+            val command = PrepareGroupCreationCommand(name = name, currency = currency)
+            var createdGroup: Group? = null
+
+            repeat(MAX_JOIN_CODE_ATTEMPTS) {
+                val candidate = prepareGroupCreationUseCase.execute(
+                    command = command,
+                    currentUser = anonymousUser,
+                    anonymousLimits = anonymousLimits
+                ).getOrElse { error ->
+                    return Result.failure(error)
+                }
+
+                val created = createGroupWithReservedJoinCode(candidate)
+                if (created) {
+                    createdGroup = candidate
+                    return@repeat
+                }
+            }
+
+            val newGroup = createdGroup
+                ?: return Result.failure(IllegalStateException("Could not reserve a unique join code."))
 
             cache.insertGroup(newGroup)
-            anonymousUser?.let {
-                cache.addUserToGroup(newGroup.id, it.id)
-            }
-
-            val groupWithMembers = cache.getGroupById(newGroup.id) ?: newGroup
-            if (!connectivityStatus.isNetworkAvailable()) {
-                pendingSyncStore.addPendingGroupSync(groupWithMembers.id)
-                return Result.success(newGroup)
-            }
-
-            try {
-                val synced = withTimeoutOrNull(1000L) {
-                    syncGroupToRemote(groupWithMembers)
-                    true
-                } ?: false
-
-                if (!synced) {
-                    pendingSyncStore.addPendingGroupSync(groupWithMembers.id)
-                    return Result.success(newGroup)
-                }
-                pendingSyncStore.removePendingGroupSync(groupWithMembers.id)
-            } catch (_: Exception) {
-                pendingSyncStore.addPendingGroupSync(groupWithMembers.id)
-            }
+            anonymousUser?.let { cache.addUserToGroup(newGroup.id, it.id) }
+            pendingSyncStore.removePendingGroupSync(newGroup.id)
 
             Result.success(newGroup)
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    private suspend fun createGroupWithReservedJoinCode(group: Group): Boolean {
+        return try {
+            withTimeoutOrNull(3000L) {
+                val now = System.currentTimeMillis()
+                val groupRef = firestore.collection("groups").document(group.id)
+                val joinCodeRef = firestore.collection("group_join_codes").document(group.joinCode)
+
+                firestore.runTransaction { transaction ->
+                    val existing = transaction.get(joinCodeRef)
+                    if (existing.exists()) {
+                        throw IllegalStateException(JOIN_CODE_COLLISION)
+                    }
+
+                    transaction.set(
+                        groupRef,
+                        mapOf(
+                            "name" to group.name,
+                            "currency" to group.currency,
+                            "joinCode" to group.joinCode,
+                            "updatedAt" to now
+                        )
+                    )
+
+                    transaction.set(
+                        joinCodeRef,
+                        mapOf(
+                            "groupId" to group.id,
+                            "joinCode" to group.joinCode,
+                            "updatedAt" to now
+                        )
+                    )
+
+                    group.members.forEach { memberId ->
+                        transaction.set(
+                            groupRef.collection("members").document(memberId),
+                            mapOf(
+                                "userId" to memberId,
+                                "updatedAt" to now
+                            )
+                        )
+                    }
+                }.awaitTaskResult()
+            } ?: return false
+
+            true
+        } catch (e: Exception) {
+            if (e.message == JOIN_CODE_COLLISION) {
+                return false
+            }
+            throw e
         }
     }
 
@@ -390,5 +443,10 @@ class GroupRepositoryImpl(
                 }
             }
         }
+    }
+
+    companion object {
+        private const val MAX_JOIN_CODE_ATTEMPTS = 8
+        private const val JOIN_CODE_COLLISION = "JOIN_CODE_COLLISION"
     }
 }

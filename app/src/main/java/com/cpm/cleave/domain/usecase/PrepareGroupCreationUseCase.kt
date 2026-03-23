@@ -4,6 +4,7 @@ import com.cpm.cleave.domain.repository.AnonymousLimits
 import com.cpm.cleave.model.Group
 import com.cpm.cleave.model.User
 import java.util.UUID
+import kotlin.random.Random
 
 data class PrepareGroupCreationCommand(
     val name: String,
@@ -24,7 +25,9 @@ class PrepareGroupCreationUseCase {
             return Result.failure(IllegalStateException("Anonymous users can belong to only 1 group."))
         }
 
-        val joinCode = UUID.randomUUID().toString().replace("-", "").take(8)
+        val joinCode = (1..JOIN_CODE_LENGTH)
+            .map { JOIN_CODE_ALPHABET[Random.nextInt(JOIN_CODE_ALPHABET.length)] }
+            .joinToString(separator = "")
 
         return Result.success(
             Group(
@@ -36,5 +39,10 @@ class PrepareGroupCreationUseCase {
                 balances = emptyMap()
             )
         )
+    }
+
+    companion object {
+        private const val JOIN_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+        private const val JOIN_CODE_LENGTH = 8
     }
 }
