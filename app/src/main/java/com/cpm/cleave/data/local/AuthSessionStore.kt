@@ -35,23 +35,67 @@ class AuthSessionStore(context: Context) {
         )
     }
 
-    suspend fun getOrCreateUser(userName: String): User {
-        val existing = userDao.getActiveUser()
-        if (existing != null) {
-            return existing.toDomain()
-        }
-
+    suspend fun clearAllActiveSessionUsers() {
         val now = System.currentTimeMillis()
-        val anonymousUser = UserEntity(
-            id = "anon_$now",
-            name = userName,
-            email = null,
-            isAnonymous = true,
-            isDeleted = false,
-            lastSeen = now
-        )
-        userDao.insertUser(anonymousUser)
-        return anonymousUser.toDomain()
+        userDao.getAllUsers()
+            .filter { !it.isDeleted }
+            .forEach { activeUser ->
+                userDao.updateUser(
+                    activeUser.copy(
+                        isDeleted = true,
+                        lastSeen = now
+                    )
+                )
+            }
+    }
+
+    suspend fun getOrCreateUser(userName: String): User {
+        return database.withTransaction {
+            val now = System.currentTimeMillis()
+            val activeUsers = userDao.getAllUsers().filter { !it.isDeleted }
+            val activeAnonymous = activeUsers.firstOrNull { it.isAnonymous }
+
+            if (activeAnonymous != null) {
+                activeUsers
+                    .filter { it.id != activeAnonymous.id }
+                    .forEach { staleActive ->
+                        userDao.updateUser(
+                            staleActive.copy(
+                                isDeleted = true,
+                                lastSeen = now
+                            )
+                        )
+                    }
+
+                val refreshedAnonymous = activeAnonymous.copy(
+                    name = activeAnonymous.name.ifBlank { userName },
+                    isDeleted = false,
+                    lastSeen = now
+                )
+                userDao.updateUser(refreshedAnonymous)
+                return@withTransaction refreshedAnonymous.toDomain()
+            }
+
+            activeUsers.forEach { staleActive ->
+                userDao.updateUser(
+                    staleActive.copy(
+                        isDeleted = true,
+                        lastSeen = now
+                    )
+                )
+            }
+
+            val anonymousUser = UserEntity(
+                id = "anon_$now",
+                name = userName,
+                email = null,
+                isAnonymous = true,
+                isDeleted = false,
+                lastSeen = now
+            )
+            userDao.insertUser(anonymousUser)
+            anonymousUser.toDomain()
+        }
     }
 
     suspend fun activateRegisteredUserAfterAuthentication(
@@ -120,6 +164,17 @@ class AuthSessionStore(context: Context) {
                     )
                 )
             }
+
+            userDao.getAllUsers()
+                .filter { !it.isDeleted && it.id != registeredUserId }
+                .forEach { staleActive ->
+                    userDao.updateUser(
+                        staleActive.copy(
+                            isDeleted = true,
+                            lastSeen = now
+                        )
+                    )
+                }
 
             val mergedUser = userDao.getUserById(registeredUserId)
                 ?: throw IllegalStateException("Could not activate registered user locally.")

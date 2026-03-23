@@ -167,7 +167,7 @@ class AuthRepositoryImpl(
     override suspend fun signOut(): Result<Unit> {
         return try {
             firebaseAuth.signOut()
-            authSessionStore.clearActiveSessionUser()
+            authSessionStore.clearAllActiveSessionUsers()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
