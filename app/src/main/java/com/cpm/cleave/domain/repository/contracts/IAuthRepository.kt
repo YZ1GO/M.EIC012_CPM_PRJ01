@@ -7,6 +7,22 @@ interface IAuthRepository {
     fun getAnonymousLimits(): AnonymousLimits
     suspend fun getCurrentUser(): Result<User?>
     suspend fun getOrCreateAnonymousUser(defaultName: String = "Guest"): Result<User>
+    suspend fun signUpWithEmail(
+        name: String,
+        email: String,
+        password: String,
+        mergeAnonymousData: Boolean = true
+    ): Result<User>
+    suspend fun signInWithEmail(
+        email: String,
+        password: String,
+        mergeAnonymousData: Boolean = false
+    ): Result<User>
+    suspend fun signInWithGoogleIdToken(
+        idToken: String,
+        mergeAnonymousData: Boolean = false
+    ): Result<User>
+    suspend fun signOut(): Result<Unit>
 
     // TODO: delete
     suspend fun switchDebugAnonymousUser(defaultName: String = "Guest"): Result<User>

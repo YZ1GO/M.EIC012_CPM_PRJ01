@@ -1,4 +1,4 @@
-package com.cpm.cleave.di
+package com.cpm.cleave.dependencyinjection
 
 import android.content.Context
 import com.cpm.cleave.data.local.AuthSessionStore
@@ -13,7 +13,10 @@ class AppContainer(context: Context) {
     private val cache = Cache(appContext)
     private val authSessionStore = AuthSessionStore(appContext)
 
-    val authRepository = AuthRepositoryImpl(authSessionStore)
+    val authRepository = AuthRepositoryImpl(
+        authSessionStore = authSessionStore,
+        cache = cache
+    )
     val groupRepository = GroupRepositoryImpl(cache, authSessionStore)
     val expenseRepository = ExpenseRepositoryImpl(cache, authSessionStore)
 }

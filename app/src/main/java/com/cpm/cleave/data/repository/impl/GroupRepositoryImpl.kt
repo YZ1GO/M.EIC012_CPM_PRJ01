@@ -9,13 +9,19 @@ import com.cpm.cleave.domain.usecase.JoinGroupUseCase
 import com.cpm.cleave.domain.usecase.PrepareGroupCreationCommand
 import com.cpm.cleave.domain.usecase.PrepareGroupCreationUseCase
 import com.cpm.cleave.model.Group
+import com.google.android.gms.tasks.Task
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 class GroupRepositoryImpl(
     private val cache: Cache,
     private val authSessionStore: AuthSessionStore,
     private val anonymousLimits: AnonymousLimits = DEFAULT_ANONYMOUS_LIMITS,
     private val prepareGroupCreationUseCase: PrepareGroupCreationUseCase = PrepareGroupCreationUseCase(),
-    private val joinGroupUseCase: JoinGroupUseCase = JoinGroupUseCase(anonymousLimits)
+    private val joinGroupUseCase: JoinGroupUseCase = JoinGroupUseCase(anonymousLimits),
+    private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
 ) : IGroupRepository {
 
     override suspend fun createGroup(name: String, currency: String): Result<Group> {
@@ -31,6 +37,9 @@ class GroupRepositoryImpl(
             anonymousUser?.let {
                 cache.addUserToGroup(newGroup.id, it.id)
             }
+
+            val groupWithMembers = cache.getGroupById(newGroup.id) ?: newGroup
+            syncGroupToRemote(groupWithMembers)
 
             Result.success(newGroup)
         } catch (e: Exception) {
@@ -75,9 +84,49 @@ class GroupRepositoryImpl(
             }
 
             val updatedGroup = cache.getGroupById(resolvedGroup.id) ?: resolvedGroup
+            syncGroupToRemote(updatedGroup)
             Result.success(updatedGroup)
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    private suspend fun syncGroupToRemote(group: Group) {
+        val now = System.currentTimeMillis()
+        val groupRef = firestore.collection("groups").document(group.id)
+        groupRef.set(
+            mapOf(
+                "name" to group.name,
+                "currency" to group.currency,
+                "joinCode" to group.joinCode,
+                "updatedAt" to now
+            ),
+            SetOptions.merge()
+        ).awaitTaskResult()
+
+        group.members.forEach { memberId ->
+            groupRef.collection("members").document(memberId)
+                .set(
+                    mapOf(
+                        "userId" to memberId,
+                        "updatedAt" to now
+                    ),
+                    SetOptions.merge()
+                )
+                .awaitTaskResult()
+        }
+    }
+
+    private suspend fun <T> Task<T>.awaitTaskResult(): T {
+        return suspendCancellableCoroutine { continuation ->
+            addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    continuation.resume(task.result)
+                } else {
+                    val exception = task.exception ?: IllegalStateException("Firebase task failed.")
+                    continuation.cancel(exception)
+                }
+            }
         }
     }
 }

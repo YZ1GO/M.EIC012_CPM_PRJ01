@@ -26,4 +26,7 @@ interface ExpenseDao {
 
     @Query("SELECT * FROM expenses WHERE paidBy = :userId")
     suspend fun getExpensesPaidBy(userId: String): List<ExpenseEntity>
+
+    @Query("UPDATE expenses SET paidBy = :newUserId WHERE paidBy = :oldUserId")
+    suspend fun reassignPaidByUser(oldUserId: String, newUserId: String)
 }

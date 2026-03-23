@@ -20,4 +20,7 @@ interface PaymentDao {
 
     @Query("SELECT * FROM payments WHERE userId = :userId")
     suspend fun getPaymentsForUser(userId: String): List<PaymentEntity>
+
+    @Query("UPDATE payments SET userId = :newUserId WHERE userId = :oldUserId")
+    suspend fun reassignUser(oldUserId: String, newUserId: String)
 }

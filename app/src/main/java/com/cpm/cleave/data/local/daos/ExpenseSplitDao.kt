@@ -19,4 +19,7 @@ interface ExpenseSplitDao {
 
     @Query("SELECT * FROM expense_splits WHERE userId = :userId")
     suspend fun getSplitsForUser(userId: String): List<ExpenseSplitEntity>
+
+    @Query("UPDATE expense_splits SET userId = :newUserId WHERE userId = :oldUserId")
+    suspend fun reassignUser(oldUserId: String, newUserId: String)
 }

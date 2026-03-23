@@ -21,7 +21,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -51,6 +53,8 @@ import com.cpm.cleave.domain.usecase.RequestCreateGroupUseCase
 import com.cpm.cleave.domain.usecase.RequestJoinGroupUseCase
 import com.cpm.cleave.ui.features.addexpense.AddExpenseScreen
 import com.cpm.cleave.ui.features.addexpense.AddExpenseViewModel
+import com.cpm.cleave.ui.features.auth.AuthScreen
+import com.cpm.cleave.ui.features.auth.AuthViewModel
 import com.cpm.cleave.ui.features.creategroup.CreateGroupScreen
 import com.cpm.cleave.ui.features.creategroup.CreateGroupViewModel
 import com.cpm.cleave.ui.features.groups.GroupDetailsScreen
@@ -60,6 +64,7 @@ import com.cpm.cleave.ui.features.groups.GroupsViewModel
 import com.cpm.cleave.ui.features.joingroup.JoinGroupScreen
 import com.cpm.cleave.ui.features.joingroup.JoinGroupViewModel
 import com.cpm.cleave.ui.features.profile.ProfileScreen
+import com.cpm.cleave.ui.features.profile.ProfileViewModel
 
 sealed class NavScreen(val route: String, val title: String, val icon: ImageVector? = null) {
     object Groups: NavScreen("groups", "Groups", Icons.Default.Groups)
@@ -83,6 +88,59 @@ fun MainScreen(
     groupRepository: IGroupRepository,
     expenseRepository: IExpenseRepository
 ) {
+    var isAuthCheckInProgress by remember { mutableStateOf(true) }
+    var isAuthenticated by remember { mutableStateOf(false) }
+    var shouldAutoCreateGuest by remember { mutableStateOf(true) }
+    var openAuthInRegisterMode by remember { mutableStateOf(false) }
+    var authFlowSessionKey by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(Unit) {
+        authRepository.getCurrentUser()
+            .onSuccess { user ->
+                if (user != null) {
+                    isAuthenticated = true
+                } else {
+                    if (shouldAutoCreateGuest) {
+                        authRepository.getOrCreateAnonymousUser()
+                            .onSuccess { isAuthenticated = true }
+                            .onFailure { isAuthenticated = false }
+                    } else {
+                        isAuthenticated = false
+                    }
+                }
+            }
+            .onFailure { isAuthenticated = false }
+        isAuthCheckInProgress = false
+    }
+
+    if (isAuthCheckInProgress) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(24.dp)) {
+            Text("Loading...")
+        }
+        return
+    }
+
+    if (!isAuthenticated) {
+        val authViewModel: AuthViewModel = viewModel(
+            key = "auth_flow_$authFlowSessionKey",
+            factory = viewModelFactory {
+                initializer { AuthViewModel(authRepository) }
+            }
+        )
+
+        AuthScreen(
+            viewModel = authViewModel,
+            defaultRegisterMode = openAuthInRegisterMode,
+            onAuthenticated = {
+                shouldAutoCreateGuest = true
+                openAuthInRegisterMode = false
+                isAuthenticated = true
+            },
+            showContinueAsGuest = true
+        )
+        return
+    }
+
     val navController = rememberNavController()
 
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -137,7 +195,27 @@ fun MainScreen(
                 )
             }
             composable(NavScreen.Profile.route) {
-                ProfileScreen(repository = authRepository)
+                val profileViewModel: ProfileViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { ProfileViewModel(authRepository) }
+                    }
+                )
+
+                ProfileScreen(
+                    viewModel = profileViewModel,
+                    onSignedOut = {
+                        shouldAutoCreateGuest = false
+                        openAuthInRegisterMode = false
+                        authFlowSessionKey += 1
+                        isAuthenticated = false
+                    },
+                    onRegisterRequested = {
+                        shouldAutoCreateGuest = false
+                        openAuthInRegisterMode = true
+                        authFlowSessionKey += 1
+                        isAuthenticated = false
+                    }
+                )
             }
 
             composable(NavScreen.CreateGroup.route) {

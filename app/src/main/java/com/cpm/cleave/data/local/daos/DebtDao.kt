@@ -23,4 +23,10 @@ interface DebtDao {
 
     @Query("SELECT * FROM debts WHERE fromUser = :fromUser AND toUser = :toUser")
     suspend fun getDebtBetween(fromUser: String, toUser: String): DebtEntity?
+
+    @Query("UPDATE debts SET fromUser = :newUserId WHERE fromUser = :oldUserId")
+    suspend fun reassignFromUser(oldUserId: String, newUserId: String)
+
+    @Query("UPDATE debts SET toUser = :newUserId WHERE toUser = :oldUserId")
+    suspend fun reassignToUser(oldUserId: String, newUserId: String)
 }
