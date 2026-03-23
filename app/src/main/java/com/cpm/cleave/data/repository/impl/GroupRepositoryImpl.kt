@@ -43,7 +43,7 @@ class GroupRepositoryImpl(
             val command = PrepareGroupCreationCommand(name = name, currency = currency)
             var createdGroup: Group? = null
 
-            repeat(MAX_JOIN_CODE_ATTEMPTS) {
+            for (attempt in 1..MAX_JOIN_CODE_ATTEMPTS) {
                 val candidate = prepareGroupCreationUseCase.execute(
                     command = command,
                     currentUser = anonymousUser,
@@ -55,7 +55,7 @@ class GroupRepositoryImpl(
                 val created = createGroupWithReservedJoinCode(candidate)
                 if (created) {
                     createdGroup = candidate
-                    return@repeat
+                    break
                 }
             }
 
@@ -137,7 +137,7 @@ class GroupRepositoryImpl(
                 return Result.success(localGroups)
             }
 
-            flushPendingGroupSyncs()
+            reconcileDeletedRemoteGroups(localGroups)
 
             val remoteResult = runCatching {
                 val remoteGroups = withTimeoutOrNull(4000L) {
@@ -146,13 +146,17 @@ class GroupRepositoryImpl(
 
                 remoteGroups.forEach { cache.upsertGroupWithMembers(it) }
 
+                // Authoritative prune: on successful remote fetch, keep only groups that still
+                // exist in the remote user scope. If remote is empty, all local user groups are removed.
                 val remoteGroupIds = remoteGroups.map { it.id }.toSet()
-                val pendingGroupIds = pendingSyncStore.getPendingGroupSyncs()
                 localGroups.forEach { localGroup ->
-                    if (localGroup.id !in remoteGroupIds && localGroup.id !in pendingGroupIds) {
+                    if (localGroup.id !in remoteGroupIds) {
+                        pendingSyncStore.removePendingGroupSync(localGroup.id)
                         cache.deleteGroupById(localGroup.id)
                     }
                 }
+
+                flushPendingGroupSyncs()
 
                 warmExpensesCache(remoteGroups.map { it.id })
                 cache.loadGroups(currentUser.id)
@@ -165,6 +169,29 @@ class GroupRepositoryImpl(
             Result.success(groups)
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    private suspend fun remoteGroupExists(groupId: String): Boolean {
+        return firestore.collection("groups")
+            .document(groupId)
+            .get()
+            .awaitTaskResult()
+            .exists()
+    }
+
+    private suspend fun reconcileDeletedRemoteGroups(localGroups: List<Group>) {
+        localGroups.forEach { localGroup ->
+            val existsRemotely = runCatching {
+                withTimeoutOrNull(3000L) {
+                    remoteGroupExists(localGroup.id)
+                }
+            }.getOrNull()
+
+            if (existsRemotely == false) {
+                pendingSyncStore.removePendingGroupSync(localGroup.id)
+                cache.deleteGroupById(localGroup.id)
+            }
         }
     }
 
@@ -239,6 +266,18 @@ class GroupRepositoryImpl(
         pendingSyncStore.getPendingGroupSyncs().forEach { groupId ->
             val localGroup = cache.getGroupById(groupId) ?: run {
                 pendingSyncStore.removePendingGroupSync(groupId)
+                return@forEach
+            }
+
+            val existsRemotely = runCatching {
+                withTimeoutOrNull(1500L) {
+                    remoteGroupExists(groupId)
+                }
+            }.getOrNull()
+
+            if (existsRemotely == false) {
+                pendingSyncStore.removePendingGroupSync(groupId)
+                cache.deleteGroupById(groupId)
                 return@forEach
             }
 
