@@ -134,11 +134,16 @@ fun CreateGroupScreen(viewModel: CreateGroupViewModel, onNavigateBack: () -> Uni
             onClick = {
                 viewModel.createGroup(onSuccess = onNavigateBack)
             },
+            enabled = !uiState.isLoading,
             colors = ButtonDefaults.buttonColors(containerColor = Color.Blue),
             shape = RoundedCornerShape(8.dp),
             modifier = Modifier.height(48.dp)
         ) {
-            Text("Create Group", fontSize = 16.sp, color = Color.White)
+            Text(
+                text = if (uiState.isLoading) "Creating..." else "Create Group",
+                fontSize = 16.sp,
+                color = Color.White
+            )
         }
     }
 }

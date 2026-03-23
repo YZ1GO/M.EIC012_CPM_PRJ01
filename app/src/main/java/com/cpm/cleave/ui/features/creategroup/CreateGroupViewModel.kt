@@ -29,15 +29,24 @@ class CreateGroupViewModel (
 
     fun createGroup(onSuccess: () -> Unit) {
         val state = _uiState.value
-        if (state.Name.isBlank()) return
+        if (state.Name.isBlank()) {
+            _uiState.update { it.copy(errorMessage = "Group name is required") }
+            return
+        }
+
+        _uiState.update { it.copy(isLoading = true, errorMessage = null) }
 
         viewModelScope.launch {
             val result = requestCreateGroupUseCase.execute(state.Name, state.Currency)
             if (result.isSuccess) {
+                _uiState.update { it.copy(isLoading = false) }
                 onSuccess()
             } else {
                 _uiState.update {
-                    it.copy(errorMessage = result.exceptionOrNull()?.message ?: "Could not create group")
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = result.exceptionOrNull()?.message ?: "Could not create group"
+                    )
                 }
             }
         }

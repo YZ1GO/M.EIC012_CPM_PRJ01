@@ -27,7 +27,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -45,9 +44,16 @@ import com.cpm.cleave.model.Group
 
 @Composable
 fun GroupsScreen(groupsViewModel: GroupsViewModel, onGroupClick: (String) -> Unit) {
-    LaunchedEffect(Unit) { groupsViewModel.loadGroups() }
-
     val uiState by groupsViewModel.uiState.collectAsState()
+    val displayedGroups = if (uiState.searchQuery.isBlank()) {
+        uiState.groups
+    } else {
+        val query = uiState.searchQuery.trim()
+        uiState.groups.filter { group ->
+            group.name.contains(query, ignoreCase = true) ||
+                group.joinCode.contains(query, ignoreCase = true)
+        }
+    }
 
     val focusManager = LocalFocusManager.current
 
@@ -77,10 +83,32 @@ fun GroupsScreen(groupsViewModel: GroupsViewModel, onGroupClick: (String) -> Uni
 
         Spacer(modifier = Modifier.height(32.dp))
 
+        if (uiState.isLoading) {
+            Text("Loading groups...")
+            return@Column
+        }
+
+        uiState.errorMessage?.let { message ->
+            Text(text = message, color = Color.Red)
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(onClick = { groupsViewModel.loadGroups() }) {
+                Text("Retry")
+            }
+            return@Column
+        }
+
+        if (displayedGroups.isEmpty()) {
+            Text(
+                text = if (uiState.searchQuery.isBlank()) "No groups yet." else "No matching groups.",
+                color = Color.Gray
+            )
+            return@Column
+        }
+
         LazyColumn(
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
-            items(uiState.groups) { group ->
+            items(displayedGroups) { group ->
                 GroupListItem(group = group, onClick = { onGroupClick(group.id) })
             }
         }

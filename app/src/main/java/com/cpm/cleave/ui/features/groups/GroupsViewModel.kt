@@ -24,16 +24,22 @@ class GroupsViewModel(
     }
 
     fun loadGroups() {
+        _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+
         viewModelScope.launch {
             getGroupsUseCase.execute()
                 .onSuccess { savedGroups ->
                     _uiState.update {
-                        it.copy(isLoading = false, groups = savedGroups)
+                        it.copy(isLoading = false, groups = savedGroups, errorMessage = null)
                     }
                 }
-                .onFailure {
+                .onFailure { error ->
                     _uiState.update {
-                        it.copy(isLoading = false, groups = emptyList())
+                        it.copy(
+                            isLoading = false,
+                            groups = emptyList(),
+                            errorMessage = error.message ?: "Could not load groups"
+                        )
                     }
                 }
         }
