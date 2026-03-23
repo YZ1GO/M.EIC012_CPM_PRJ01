@@ -118,6 +118,8 @@ class ProfileViewModel(
                         )
                     }
                     _uiEffect.emit(ProfileUiEffect.ShowMessage("Switched debug user"))
+                    // TODO(debug-cleanup): remove this emit when deleting debug switch-user feature.
+                    _uiEffect.emit(ProfileUiEffect.DebugUserSwitched)
                 }
                 .onFailure { error ->
                     val message = error.message ?: "Could not switch debug user"
@@ -148,6 +150,8 @@ class ProfileViewModel(
                                 )
                             }
                             _uiEffect.emit(ProfileUiEffect.ShowMessage("Cleared local debug data"))
+                            // TODO(debug-cleanup): remove this emit when deleting debug clear-data feature.
+                            _uiEffect.emit(ProfileUiEffect.DebugDataCleared)
                         }
                         .onFailure { error ->
                             val message = error.message

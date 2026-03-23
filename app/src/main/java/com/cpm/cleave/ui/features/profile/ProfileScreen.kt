@@ -31,7 +31,9 @@ import androidx.credentials.CredentialManager
 fun ProfileScreen(
     viewModel: ProfileViewModel,
     onSignedOut: () -> Unit = {},
-    onRegisterRequested: () -> Unit = {}
+    onRegisterRequested: () -> Unit = {},
+    onDebugUserSwitched: () -> Unit = {},
+    onDebugDataCleared: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
@@ -63,6 +65,14 @@ fun ProfileScreen(
                     }
                     Toast.makeText(context, "Signed out", Toast.LENGTH_SHORT).show()
                     onSignedOut()
+                }
+
+                ProfileUiEffect.DebugDataCleared -> {
+                    onDebugDataCleared()
+                }
+
+                ProfileUiEffect.DebugUserSwitched -> {
+                    onDebugUserSwitched()
                 }
             }
         }

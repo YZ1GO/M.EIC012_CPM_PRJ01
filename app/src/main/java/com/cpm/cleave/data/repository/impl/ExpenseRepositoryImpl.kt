@@ -2,22 +2,28 @@ package com.cpm.cleave.data.repository.impl
 
 import com.cpm.cleave.data.local.Cache
 import com.cpm.cleave.data.local.AuthSessionStore
+import com.cpm.cleave.data.local.ConnectivityStatus
+import com.cpm.cleave.data.local.PendingSyncStore
 import com.cpm.cleave.domain.repository.contracts.IExpenseRepository
 import com.cpm.cleave.domain.usecase.CalculateDebtsUseCase
 import com.cpm.cleave.domain.usecase.CreateExpenseCommand
 import com.cpm.cleave.domain.usecase.CreateExpenseUseCase
 import com.cpm.cleave.model.Debt
 import com.cpm.cleave.model.Expense
+import com.cpm.cleave.model.ExpenseShare
 import com.google.android.gms.tasks.Task
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 import kotlin.coroutines.resume
 
 class ExpenseRepositoryImpl(
     private val cache: Cache,
     private val authSessionStore: AuthSessionStore,
+    private val pendingSyncStore: PendingSyncStore,
+    private val connectivityStatus: ConnectivityStatus,
     private val calculateDebtsUseCase: CalculateDebtsUseCase = CalculateDebtsUseCase(),
     private val createExpenseUseCase: CreateExpenseUseCase = CreateExpenseUseCase(),
     private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
@@ -25,7 +31,32 @@ class ExpenseRepositoryImpl(
 
     override suspend fun getExpensesByGroup(groupId: String): Result<List<Expense>> {
         return try {
-            Result.success(cache.getExpensesByGroup(groupId))
+            val localExpenses = cache.getExpensesByGroup(groupId)
+            if (!connectivityStatus.isNetworkAvailable()) {
+                return Result.success(localExpenses)
+            }
+
+            flushPendingExpenseSyncs()
+
+            val remoteResult = runCatching {
+                val remotePayload = withTimeoutOrNull(1500L) {
+                    fetchExpensesFromRemote(groupId)
+                } ?: throw IllegalStateException("Remote expenses fetch timed out")
+
+                val (remoteExpenses, sharesByExpenseId) = remotePayload
+                cache.upsertExpensesForGroup(
+                    groupId = groupId,
+                    expenses = remoteExpenses,
+                    sharesByExpenseId = sharesByExpenseId
+                )
+                cache.getExpensesByGroup(groupId)
+            }
+
+            Result.success(
+                remoteResult.getOrElse {
+                    localExpenses
+                }
+            )
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -87,20 +118,110 @@ class ExpenseRepositoryImpl(
                 memberIds = splitMemberIds
             )
 
-            syncExpenseToRemote(
-                expenseId = expenseId,
-                groupId = groupId,
-                amount = amount,
-                description = description,
-                date = now,
-                paidByUserId = paidByUserId,
-                splitMemberIds = splitMemberIds
-            )
+            if (!connectivityStatus.isNetworkAvailable()) {
+                pendingSyncStore.addPendingExpenseSync(groupId, expenseId)
+                return Result.success(Unit)
+            }
+
+            val syncSucceeded = runCatching {
+                withTimeoutOrNull(1500L) {
+                    syncExpenseToRemote(
+                        expenseId = expenseId,
+                        groupId = groupId,
+                        amount = amount,
+                        description = description,
+                        date = now,
+                        paidByUserId = paidByUserId,
+                        splitMemberIds = splitMemberIds
+                    )
+                    true
+                } ?: false
+            }.getOrDefault(false)
+
+            if (syncSucceeded) {
+                pendingSyncStore.removePendingExpenseSync(groupId, expenseId)
+            } else {
+                pendingSyncStore.addPendingExpenseSync(groupId, expenseId)
+            }
 
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    private suspend fun flushPendingExpenseSyncs() {
+        if (!connectivityStatus.isNetworkAvailable()) return
+
+        pendingSyncStore.getPendingExpenseSyncs().forEach { pending ->
+            val localExpense = cache.getExpenseById(pending.expenseId) ?: run {
+                pendingSyncStore.removePendingExpenseSync(pending.groupId, pending.expenseId)
+                return@forEach
+            }
+            val shares = cache.getExpenseSharesForExpense(localExpense.id)
+
+            val syncSucceeded = runCatching {
+                withTimeoutOrNull(1000L) {
+                    syncExpenseToRemote(
+                        expenseId = localExpense.id,
+                        groupId = pending.groupId,
+                        amount = localExpense.amount,
+                        description = localExpense.description,
+                        date = localExpense.date,
+                        paidByUserId = localExpense.paidByUserId,
+                        splitMemberIds = shares.map { it.userId }
+                    )
+                    true
+                } ?: false
+            }.getOrDefault(false)
+
+            if (syncSucceeded) {
+                pendingSyncStore.removePendingExpenseSync(pending.groupId, pending.expenseId)
+            } else {
+                // Keep pending for later retry.
+            }
+        }
+    }
+
+    private suspend fun fetchExpensesFromRemote(groupId: String): Pair<List<Expense>, Map<String, List<ExpenseShare>>> {
+        val expensesSnapshot = firestore.collection("groups")
+            .document(groupId)
+            .collection("expenses")
+            .get()
+            .awaitTaskResult()
+
+        val expenses = mutableListOf<Expense>()
+        val sharesByExpenseId = mutableMapOf<String, List<ExpenseShare>>()
+
+        for (expenseDoc in expensesSnapshot.documents) {
+            val expense = Expense(
+                id = expenseDoc.id,
+                amount = (expenseDoc.getDouble("amount") ?: 0.0),
+                description = expenseDoc.getString("description") ?: "",
+                date = expenseDoc.getLong("date") ?: 0L,
+                groupId = expenseDoc.getString("groupId") ?: groupId,
+                paidByUserId = expenseDoc.getString("paidByUserId") ?: "",
+                imagePath = expenseDoc.getString("imagePath")
+            )
+            expenses.add(expense)
+
+            val splitsSnapshot = firestore.collection("groups")
+                .document(groupId)
+                .collection("expenses")
+                .document(expenseDoc.id)
+                .collection("splits")
+                .get()
+                .awaitTaskResult()
+
+            val shares = splitsSnapshot.documents.mapNotNull { splitDoc ->
+                val userId = splitDoc.getString("userId") ?: return@mapNotNull null
+                val amount = splitDoc.getDouble("amount") ?: 0.0
+                ExpenseShare(userId = userId, amount = amount)
+            }
+            sharesByExpenseId[expenseDoc.id] = shares
+        }
+
+        return expenses to sharesByExpenseId
     }
 
     private suspend fun syncExpenseToRemote(

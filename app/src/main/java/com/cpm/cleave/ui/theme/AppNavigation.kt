@@ -93,6 +93,7 @@ fun MainScreen(
     var shouldAutoCreateGuest by remember { mutableStateOf(true) }
     var openAuthInRegisterMode by remember { mutableStateOf(false) }
     var authFlowSessionKey by remember { mutableIntStateOf(0) }
+    var groupsSessionKey by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(Unit) {
         authRepository.getCurrentUser()
@@ -182,6 +183,7 @@ fun MainScreen(
         ) {
             composable(NavScreen.Groups.route) {
                 val groupsViewModel: GroupsViewModel = viewModel(
+                    key = "groups_flow_$groupsSessionKey",
                     factory = viewModelFactory {
                         initializer { GroupsViewModel(GetGroupsUseCase(groupRepository)) }
                     }
@@ -214,6 +216,21 @@ fun MainScreen(
                         openAuthInRegisterMode = true
                         authFlowSessionKey += 1
                         isAuthenticated = false
+                    },
+                    // TODO(debug-cleanup): remove this callback when debug switch-user tools are removed.
+                    onDebugUserSwitched = {
+                        groupsSessionKey += 1
+                    },
+                    // TODO(debug-cleanup): remove this callback and groupsSessionKey when debug clear-data tools are removed.
+                    onDebugDataCleared = {
+                        groupsSessionKey += 1
+                        navController.navigate(NavScreen.Groups.route) {
+                            popUpTo(navController.graph.startDestinationId) {
+                                saveState = false
+                            }
+                            launchSingleTop = true
+                            restoreState = false
+                        }
                     }
                 )
             }
@@ -226,7 +243,14 @@ fun MainScreen(
                 )
 
                 CreateGroupScreen(createGroupViewModel, onNavigateBack = {
-                    navController.popBackStack()
+                    groupsSessionKey += 1
+                    navController.navigate(NavScreen.Groups.route) {
+                        popUpTo(navController.graph.startDestinationId) {
+                            saveState = false
+                        }
+                        launchSingleTop = true
+                        restoreState = false
+                    }
                 })
             }
 
@@ -238,7 +262,14 @@ fun MainScreen(
                 )
 
                 JoinGroupScreen(joinGroupViewModel, onNavigateBack = {
-                    navController.popBackStack()
+                    groupsSessionKey += 1
+                    navController.navigate(NavScreen.Groups.route) {
+                        popUpTo(navController.graph.startDestinationId) {
+                            saveState = false
+                        }
+                        launchSingleTop = true
+                        restoreState = false
+                    }
                 })
             }
 

@@ -6,6 +6,7 @@ import com.cpm.cleave.data.local.entities.GroupEntity
 import com.cpm.cleave.data.local.entities.GroupMemberEntity
 import com.cpm.cleave.data.local.entities.ExpenseEntity
 import com.cpm.cleave.data.local.entities.ExpenseSplitEntity
+import com.cpm.cleave.data.local.entities.UserEntity
 import com.cpm.cleave.model.Expense
 import com.cpm.cleave.model.ExpenseShare
 import com.cpm.cleave.model.Group
@@ -16,6 +17,7 @@ class Cache(context: Context) {
     private val groupMemberDao = database.groupMemberDao()
     private val expenseDao = database.expenseDao()
     private val expenseSplitDao = database.expenseSplitDao()
+    private val userDao = database.userDao()
 
     suspend fun saveGroups(groups: List<Group>) {
         groups.forEach { group ->
@@ -86,6 +88,34 @@ class Cache(context: Context) {
         groupDao.insertGroup(groupEntity)
     }
 
+    suspend fun deleteGroupById(groupId: String) {
+        val entity = groupDao.getGroupById(groupId) ?: return
+        groupDao.deleteGroup(entity)
+    }
+
+    suspend fun upsertGroupWithMembers(group: Group) {
+        database.withTransaction {
+            groupDao.insertGroup(
+                GroupEntity(
+                    id = group.id,
+                    name = group.name,
+                    currency = group.currency,
+                    joinCode = group.joinCode
+                )
+            )
+
+            group.members.forEach { memberId ->
+                ensureUserExists(memberId)
+                groupMemberDao.addMember(
+                    GroupMemberEntity(
+                        groupId = group.id,
+                        userId = memberId
+                    )
+                )
+            }
+        }
+    }
+
     suspend fun insertExpenseWithSplit(
         expenseId: String,
         amount: Double,
@@ -96,6 +126,7 @@ class Cache(context: Context) {
         memberIds: List<String>
     ) {
         database.withTransaction {
+            ensureUserExists(paidBy)
             val expense = ExpenseEntity(
                 id = expenseId,
                 amount = amount,
@@ -105,11 +136,13 @@ class Cache(context: Context) {
                 paidBy = paidBy
             )
             expenseDao.insertExpense(expense)
+            expenseSplitDao.deleteSplitsForExpense(expenseId)
 
             if (memberIds.isEmpty()) return@withTransaction
             val splitAmount = amount / memberIds.size
 
             memberIds.forEach { memberId ->
+                ensureUserExists(memberId)
                 expenseSplitDao.insertSplit(
                     ExpenseSplitEntity(
                         expenseId = expenseId,
@@ -135,6 +168,44 @@ class Cache(context: Context) {
         }
     }
 
+    suspend fun upsertExpensesForGroup(
+        groupId: String,
+        expenses: List<Expense>,
+        sharesByExpenseId: Map<String, List<ExpenseShare>>
+    ) {
+        database.withTransaction {
+            if (groupDao.getGroupById(groupId) == null) return@withTransaction
+
+            expenses.forEach { expense ->
+                ensureUserExists(expense.paidByUserId)
+                expenseDao.insertExpense(
+                    ExpenseEntity(
+                        id = expense.id,
+                        amount = expense.amount,
+                        description = expense.description,
+                        date = expense.date,
+                        groupId = expense.groupId,
+                        paidBy = expense.paidByUserId,
+                        imagePath = expense.imagePath
+                    )
+                )
+
+                expenseSplitDao.deleteSplitsForExpense(expense.id)
+
+                sharesByExpenseId[expense.id].orEmpty().forEach { share ->
+                    ensureUserExists(share.userId)
+                    expenseSplitDao.insertSplit(
+                        ExpenseSplitEntity(
+                            expenseId = expense.id,
+                            userId = share.userId,
+                            amount = share.amount
+                        )
+                    )
+                }
+            }
+        }
+    }
+
     suspend fun getExpenseSharesForExpense(expenseId: String): List<ExpenseShare> {
         return expenseSplitDao.getSplitsForExpense(expenseId).map { split ->
             ExpenseShare(
@@ -142,6 +213,19 @@ class Cache(context: Context) {
                 amount = split.amount
             )
         }
+    }
+
+    suspend fun getExpenseById(expenseId: String): Expense? {
+        val entity = expenseDao.getExpenseById(expenseId) ?: return null
+        return Expense(
+            id = entity.id,
+            amount = entity.amount,
+            description = entity.description,
+            date = entity.date,
+            groupId = entity.groupId,
+            paidByUserId = entity.paidBy,
+            imagePath = entity.imagePath
+        )
     }
 
     suspend fun addUserToGroup(groupId: String, userId: String): Boolean {
@@ -156,5 +240,19 @@ class Cache(context: Context) {
 
     suspend fun isUserInGroup(groupId: String, userId: String): Boolean {
         return groupMemberDao.isUserInGroup(groupId, userId)
+    }
+
+    private suspend fun ensureUserExists(userId: String) {
+        if (userDao.getUserById(userId) != null) return
+        userDao.insertUser(
+            UserEntity(
+                id = userId,
+                name = userId,
+                email = null,
+                isAnonymous = false,
+                isDeleted = false,
+                lastSeen = System.currentTimeMillis()
+            )
+        )
     }
 }

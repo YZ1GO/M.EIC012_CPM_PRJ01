@@ -1,10 +1,10 @@
 package com.cpm.cleave.data.local
 
+import android.content.pm.ApplicationInfo
 import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
-import com.cpm.cleave.BuildConfig
 import com.cpm.cleave.data.local.daos.DebtDao
 import com.cpm.cleave.data.local.daos.ExpenseDao
 import com.cpm.cleave.data.local.daos.ExpenseSplitDao
@@ -54,7 +54,8 @@ abstract class CleaveDatabase : RoomDatabase() {
                     "cleave_database"
                 )
 
-                if (BuildConfig.DEBUG) {
+                val isDebuggable = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+                if (isDebuggable) {
                     builder.fallbackToDestructiveMigration(dropAllTables = true)
                 }
 
