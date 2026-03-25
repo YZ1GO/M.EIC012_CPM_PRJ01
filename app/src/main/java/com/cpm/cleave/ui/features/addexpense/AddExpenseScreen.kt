@@ -16,8 +16,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -34,6 +35,12 @@ import androidx.compose.foundation.rememberScrollState
 fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit) {
     val uiState by viewModel.uiState.collectAsState()
     val scrollState = rememberScrollState()
+    val titleTopSpacing = 24.dp
+    val titleBottomSpacing = 32.dp
+    val sectionSpacing = 16.dp
+    val labelForMember: (String) -> String = { memberId ->
+        uiState.memberDisplayNames[memberId] ?: memberId
+    }
 
     val contributionTotal = uiState.selectedPayerIds.sumOf { payerId ->
         uiState.payerAmountInputs[payerId]?.toDoubleOrNull() ?: 0.0
@@ -46,64 +53,83 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(titleTopSpacing))
         Text(
             text = "Add Expense",
-            color = Color.Blue,
+            color = Color.Unspecified,
             fontSize = 24.sp,
-            fontWeight = FontWeight.Medium
+            fontWeight = FontWeight.SemiBold
         )
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(titleBottomSpacing))
 
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .border(1.dp, Color(0xFFDCE2EA), RoundedCornerShape(12.dp))
+                .background(Color(0x14FFFFFF), RoundedCornerShape(16.dp))
+                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(16.dp))
                 .padding(12.dp)
         ) {
-            Text("Amount", fontSize = 14.sp)
-            OutlinedTextField(
+            Text("Amount", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            TextField(
                 value = uiState.amountInput,
                 onValueChange = { viewModel.onAmountChanged(it) },
                 placeholder = { Text("0.00") },
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color(0x1AFFFFFF),
+                    unfocusedContainerColor = Color(0x1AFFFFFF),
+                    disabledContainerColor = Color(0x10FFFFFF),
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    disabledIndicatorColor = Color.Transparent
+                ),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)
             )
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(sectionSpacing))
 
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .border(1.dp, Color(0xFFDCE2EA), RoundedCornerShape(12.dp))
+                .background(Color(0x14FFFFFF), RoundedCornerShape(16.dp))
+                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(16.dp))
                 .padding(12.dp)
         ) {
-            Text("Description", fontSize = 14.sp)
-            OutlinedTextField(
+            Text("Description", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            TextField(
                 value = uiState.description,
                 onValueChange = { viewModel.onDescriptionChanged(it) },
                 placeholder = { Text("Dinner, groceries, fuel...") },
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color(0x1AFFFFFF),
+                    unfocusedContainerColor = Color(0x1AFFFFFF),
+                    disabledContainerColor = Color(0x10FFFFFF),
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    disabledIndicatorColor = Color.Transparent
+                ),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)
             )
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(sectionSpacing))
 
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .border(1.dp, Color(0xFFDCE2EA), RoundedCornerShape(12.dp))
+                .background(Color(0x14FFFFFF), RoundedCornerShape(16.dp))
+                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(16.dp))
                 .padding(12.dp)
         ) {
-            Text("Who paid and how much?", fontSize = 14.sp)
-            Spacer(modifier = Modifier.height(8.dp))
+            Text("Who paid and how much?", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Spacer(modifier = Modifier.height(6.dp))
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
@@ -129,19 +155,21 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
             if (uiState.buyerMode == BuyerMode.SINGLE_BUYER) {
                 Text(
-                    text = "Buyer: ${uiState.primaryBuyerId.ifBlank { "(unknown)" }} pays full amount",
+                    text = "Buyer: ${uiState.primaryBuyerId.takeIf { it.isNotBlank() }?.let(labelForMember) ?: "(unknown)"} pays full amount",
                     color = Color.Gray,
                     fontSize = 12.sp
                 )
             } else {
-                uiState.availablePayers.forEach { payer ->
+                uiState.availablePayers.forEachIndexed { index, payer ->
                     val selected = uiState.selectedPayerIds.contains(payer)
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -152,10 +180,10 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                             }
                         )
                         Text(
-                            text = payer,
+                            text = labelForMember(payer),
                             modifier = Modifier.weight(1f)
                         )
-                        OutlinedTextField(
+                        TextField(
                             value = uiState.payerAmountInputs[payer].orEmpty(),
                             onValueChange = { value ->
                                 if (selected) {
@@ -164,14 +192,26 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                             },
                             enabled = selected,
                             placeholder = { Text("0.00") },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(0.8f),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color(0x1AFFFFFF),
+                                unfocusedContainerColor = Color(0x1AFFFFFF),
+                                disabledContainerColor = Color(0x10FFFFFF),
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                disabledIndicatorColor = Color.Transparent
+                            ),
                             singleLine = true
                         )
                     }
+
+                    if (index < uiState.availablePayers.lastIndex) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = "Contributions: $contributionTotal / ${uiState.amountInput.ifBlank { "0.0" }}",
                     color = Color.Gray,
@@ -180,16 +220,17 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(sectionSpacing))
 
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .border(1.dp, Color(0xFFDCE2EA), RoundedCornerShape(12.dp))
+                .background(Color(0x14FFFFFF), RoundedCornerShape(16.dp))
+                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(16.dp))
                 .padding(12.dp)
         ) {
-            Text("How to split?", fontSize = 14.sp)
-            Spacer(modifier = Modifier.height(8.dp))
+            Text("How to split?", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Spacer(modifier = Modifier.height(6.dp))
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
@@ -216,7 +257,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
             }
 
             if (uiState.splitMode == SplitMode.SELECTED_MEMBERS) {
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 uiState.availablePayers.forEach { memberId ->
                     val isPayer = if (uiState.buyerMode == BuyerMode.SINGLE_BUYER) {
                         uiState.primaryBuyerId == memberId
@@ -235,7 +276,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                             }
                         )
                         Text(
-                            text = if (isPayer) "$memberId (payer, required)" else memberId,
+                            text = if (isPayer) "${labelForMember(memberId)} (payer, required)" else labelForMember(memberId),
                             color = Color.Gray
                         )
                     }

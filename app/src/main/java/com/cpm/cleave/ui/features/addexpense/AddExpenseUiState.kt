@@ -14,6 +14,7 @@ data class AddExpenseUiState(
     val amountInput: String = "",
     val description: String = "",
     val availablePayers: List<String> = emptyList(),
+    val memberDisplayNames: Map<String, String> = emptyMap(),
     val buyerMode: BuyerMode = BuyerMode.SINGLE_BUYER,
     val primaryBuyerId: String = "",
     val selectedPayerIds: Set<String> = emptySet(),

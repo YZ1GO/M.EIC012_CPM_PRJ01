@@ -6,6 +6,7 @@ import com.cpm.cleave.model.User
 interface IAuthRepository {
     fun getAnonymousLimits(): AnonymousLimits
     suspend fun getCurrentUser(): Result<User?>
+    suspend fun getUserDisplayName(userId: String): Result<String?>
     suspend fun getOrCreateAnonymousUser(defaultName: String = "Guest"): Result<User>
     suspend fun signUpWithEmail(
         name: String,

@@ -138,6 +138,18 @@ class ExpenseRepositoryImpl(
         }
     }
 
+    override suspend fun getExpenseSharesByGroup(groupId: String): Result<Map<String, List<ExpenseShare>>> {
+        return try {
+            val expenses = getExpensesByGroup(groupId).getOrElse { return Result.failure(it) }
+            val shares = expenses.associate { expense ->
+                expense.id to cache.getExpenseSharesForExpense(expense.id)
+            }
+            Result.success(shares)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     override suspend fun getDebtsByGroup(groupId: String): Result<List<Debt>> {
         return try {
             val group = cache.getGroupById(groupId) ?: return Result.success(emptyList())

@@ -38,6 +38,29 @@ class AuthRepositoryImpl(
         }
     }
 
+    override suspend fun getUserDisplayName(userId: String): Result<String?> {
+        return try {
+            if (userId.isBlank()) return Result.success(null)
+
+            val local = authSessionStore.getUserById(userId)
+            if (local != null && local.name.isNotBlank() && local.name != userId) {
+                return Result.success(local.name)
+            }
+
+            val remoteName = runCatching {
+                firestore.collection("users")
+                    .document(userId)
+                    .get()
+                    .awaitTaskResult()
+                    .getString("name")
+            }.getOrNull()
+
+            Result.success(remoteName?.takeIf { it.isNotBlank() })
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     override suspend fun getOrCreateAnonymousUser(defaultName: String): Result<User> {
         return try {
             Result.success(authSessionStore.getOrCreateUser(defaultName))

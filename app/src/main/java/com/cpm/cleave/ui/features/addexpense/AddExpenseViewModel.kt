@@ -30,6 +30,14 @@ class AddExpenseViewModel(
             val currentUserId = authRepository.getCurrentUser().getOrNull()?.id.orEmpty()
             getAddExpenseMembersUseCase.execute(groupId)
                 .onSuccess { members ->
+                    val memberDisplayNames = members.associateWith { memberId ->
+                        when {
+                            memberId == currentUserId -> "You"
+                            else -> authRepository.getUserDisplayName(memberId).getOrNull()
+                                ?.takeIf { it.isNotBlank() }
+                                ?: memberId
+                        }
+                    }
                     val defaultPayer = when {
                         currentUserId.isNotBlank() && members.contains(currentUserId) -> currentUserId
                         else -> members.firstOrNull().orEmpty()
@@ -37,6 +45,7 @@ class AddExpenseViewModel(
                     _uiState.update {
                         it.copy(
                             availablePayers = members,
+                            memberDisplayNames = memberDisplayNames,
                             buyerMode = BuyerMode.SINGLE_BUYER,
                             primaryBuyerId = defaultPayer,
                             selectedPayerIds = if (defaultPayer.isBlank()) emptySet() else setOf(defaultPayer),

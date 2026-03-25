@@ -2,6 +2,7 @@ package com.cpm.cleave.ui.features.groups
 
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,6 +46,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.cpm.cleave.model.Group
 import com.cpm.cleave.model.Expense
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun GroupsScreen(groupsViewModel: GroupsViewModel, onGroupClick: (String) -> Unit) {
@@ -164,6 +168,9 @@ fun GroupDetailsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
+    val titleTopSpacing = 24.dp
+    val titleBottomSpacing = 32.dp
+    val sectionSpacing = 16.dp
 
     LaunchedEffect(Unit) { viewModel.refreshGroupData() }
 
@@ -177,116 +184,147 @@ fun GroupDetailsScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    val sectionModifier = Modifier
+        .fillMaxWidth()
+        .background(Color(0x14FFFFFF), RoundedCornerShape(16.dp))
+        .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(16.dp))
+        .padding(12.dp)
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Spacer(modifier = Modifier.height(titleTopSpacing))
         Text("Group Details", fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(titleBottomSpacing))
 
         uiState.errorMessage?.let { Text(it, color = Color.Red) }
 
         val currentGroup = uiState.group
         if (currentGroup == null) {
-            Text("Loading group...")
+            Text("Loading group...", color = Color.Gray, fontSize = 13.sp)
             return@Column
         }
 
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, Color(0xFFDCE2EA), RoundedCornerShape(12.dp))
-                .padding(12.dp)
-        ) {
-            Text("Name: ${currentGroup.name}")
-            Text("Currency: ${currentGroup.currency}")
-            Text("Code: ${currentGroup.joinCode}")
+        Column(modifier = sectionModifier) {
+            SectionTitle("Group")
+            Spacer(modifier = Modifier.height(6.dp))
+            TopicRow("Name", currentGroup.name)
+            TopicRow("Currency", currentGroup.currency)
+            TopicRow("Code", currentGroup.joinCode)
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, Color(0xFFDCE2EA), RoundedCornerShape(12.dp))
-                .padding(12.dp)
-        ) {
-            Text("Members (${currentGroup.members.size})", fontWeight = FontWeight.Medium)
+        Spacer(modifier = Modifier.height(sectionSpacing))
+        Column(modifier = sectionModifier) {
+            SectionTitle("Members (${currentGroup.members.size})")
+            Spacer(modifier = Modifier.height(6.dp))
 
             if (currentGroup.members.isEmpty()) {
-                Text("No members in this group yet.")
+                Text("No members in this group yet.", color = Color.Gray, fontSize = 13.sp)
             } else {
                 currentGroup.members.forEach { memberId ->
-                    Text("- $memberId", color = Color.Gray)
+                    val memberName = uiState.userDisplayNames[memberId] ?: memberId
+                    TopicRow("Member", memberName)
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, Color(0xFFDCE2EA), RoundedCornerShape(12.dp))
-                .padding(12.dp)
-        ) {
-            Text("Expenses (${uiState.expenses.size})", fontWeight = FontWeight.Medium)
+        Spacer(modifier = Modifier.height(sectionSpacing))
+        Column(modifier = sectionModifier) {
+            SectionTitle("Expenses (${uiState.expenses.size})")
+            Spacer(modifier = Modifier.height(6.dp))
 
             if (uiState.expenses.isEmpty()) {
-                Text("No expenses yet.")
+                Text("No expenses yet.", color = Color.Gray, fontSize = 13.sp)
             } else {
                 uiState.expenses.forEach { expense ->
-                    ExpenseDetailsItem(expense = expense)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, Color(0xFFDCE2EA), RoundedCornerShape(12.dp))
-                .padding(12.dp)
-        ) {
-            Text("Debts (${uiState.debts.size})", fontWeight = FontWeight.Medium)
-
-            if (uiState.debts.isEmpty()) {
-                Text("No debts yet.")
-            } else {
-                uiState.debts.forEach { debt ->
-                    Text(
-                        text = "- ${debt.fromUser} owes ${debt.toUser}: ${debt.amount}",
-                        color = Color.Gray
+                    ExpenseDetailsItem(
+                        expense = expense,
+                        userDisplayNames = uiState.userDisplayNames
                     )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(sectionSpacing))
+        Column(modifier = sectionModifier) {
+            SectionTitle("Debts (${uiState.debts.size})")
+            Spacer(modifier = Modifier.height(6.dp))
+
+            if (uiState.debtsWithReason.isEmpty()) {
+                Text("No debts yet.", color = Color.Gray, fontSize = 13.sp)
+            } else {
+                uiState.debtsWithReason.forEach { debtWithReason ->
+                    val debt = debtWithReason.debt
+                    val fromName = uiState.userDisplayNames[debt.fromUser] ?: debt.fromUser
+                    val toName = uiState.userDisplayNames[debt.toUser] ?: debt.toUser
+                    val reasonText = debtWithReason.reasons
+                        .joinToString(", ") { reason -> "${reason.expenseLabel}: ${reason.amount}" }
+                        .ifBlank { "No expense details" }
+                    Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                        TopicRow("From", fromName)
+                        TopicRow("To", toName)
+                        TopicRow("Amount", debt.amount.toString())
+                        TopicRow("Reason", reasonText)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(sectionSpacing))
 
         Button(
             onClick = { onAddExpenseClick(currentGroup.id) },
             colors = ButtonDefaults.buttonColors(containerColor = Color.Blue),
-            shape = RoundedCornerShape(8.dp)
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
         ) {
             Text("Add Expense", color = Color.White)
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(sectionSpacing))
     }
 }
 
 @Composable
-private fun ExpenseDetailsItem(expense: Expense) {
+private fun ExpenseDetailsItem(expense: Expense, userDisplayNames: Map<String, String>) {
     val desc = expense.description.ifBlank { "(No description)" }
     val payerText = expense.payerContributions
-        .joinToString(separator = ", ") { payer -> "${payer.userId}: ${payer.amount}" }
-        .ifBlank { expense.paidByUserId }
+        .joinToString(separator = ", ") { payer ->
+            val name = userDisplayNames[payer.userId] ?: payer.userId
+            "$name: ${payer.amount}"
+        }
+        .ifBlank { userDisplayNames[expense.paidByUserId] ?: expense.paidByUserId }
+
+    val dateText = formatDate(expense.date)
 
     Column(modifier = Modifier.padding(vertical = 6.dp)) {
-        Text(text = desc, fontWeight = FontWeight.Medium)
-        Text(text = "Total: ${expense.amount}", color = Color.Gray, fontSize = 13.sp)
-        Text(text = "Payers: $payerText", color = Color.Gray, fontSize = 13.sp)
-        Text(text = "Date: ${expense.date}", color = Color.Gray, fontSize = 12.sp)
+        TopicRow("Description", desc)
+        TopicRow("Total", expense.amount.toString())
+        TopicRow("Payers", payerText)
+        TopicRow("Date", dateText)
     }
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(text = text, fontWeight = FontWeight.Medium, fontSize = 16.sp)
+}
+
+@Composable
+private fun TopicRow(topic: String, value: String) {
+    Text(text = "$topic: $value", color = Color.Gray, fontSize = 13.sp)
+}
+
+private fun formatDate(timestamp: Long): String {
+    if (timestamp <= 0L) return "-"
+    return runCatching {
+        val formatter = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
+        formatter.format(Date(timestamp))
+    }.getOrElse { "-" }
 }

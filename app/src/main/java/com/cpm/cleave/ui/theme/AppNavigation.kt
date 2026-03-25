@@ -286,7 +286,8 @@ fun MainScreen(
                                 groupId = groupId,
                                 getGroupDetailsUseCase = GetGroupDetailsUseCase(
                                     groupRepository = groupRepository,
-                                    expenseRepository = expenseRepository
+                                    expenseRepository = expenseRepository,
+                                    authRepository = authRepository
                                 )
                             )
                         }
