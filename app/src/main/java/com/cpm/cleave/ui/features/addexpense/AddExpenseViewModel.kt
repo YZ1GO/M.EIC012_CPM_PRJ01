@@ -2,6 +2,7 @@ package com.cpm.cleave.ui.features.addexpense
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.cpm.cleave.domain.repository.contracts.IAuthRepository
 import com.cpm.cleave.domain.usecase.GetAddExpenseMembersUseCase
 import com.cpm.cleave.domain.usecase.RequestCreateExpenseUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -11,6 +12,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class AddExpenseViewModel(
+    private val authRepository: IAuthRepository,
     private val getAddExpenseMembersUseCase: GetAddExpenseMembersUseCase,
     private val requestCreateExpenseUseCase: RequestCreateExpenseUseCase,
     private val groupId: String
@@ -25,12 +27,20 @@ class AddExpenseViewModel(
 
     private fun loadGroupMembers() {
         viewModelScope.launch {
+            val currentUserId = authRepository.getCurrentUser().getOrNull()?.id.orEmpty()
             getAddExpenseMembersUseCase.execute(groupId)
                 .onSuccess { members ->
+                    val defaultPayer = when {
+                        currentUserId.isNotBlank() && members.contains(currentUserId) -> currentUserId
+                        else -> members.firstOrNull().orEmpty()
+                    }
                     _uiState.update {
                         it.copy(
                             availablePayers = members,
-                            payerId = members.firstOrNull() ?: "",
+                            buyerMode = BuyerMode.SINGLE_BUYER,
+                            primaryBuyerId = defaultPayer,
+                            selectedPayerIds = if (defaultPayer.isBlank()) emptySet() else setOf(defaultPayer),
+                            payerAmountInputs = if (defaultPayer.isBlank()) emptyMap() else mapOf(defaultPayer to ""),
                             selectedSplitMemberIds = members.toSet()
                         )
                     }
@@ -44,18 +54,97 @@ class AddExpenseViewModel(
     }
 
     fun onAmountChanged(value: String) {
-        _uiState.update { it.copy(amountInput = value, errorMessage = null) }
+        _uiState.update { current ->
+            val updatedPayerAmounts = when (current.buyerMode) {
+                BuyerMode.SINGLE_BUYER -> {
+                    if (current.primaryBuyerId.isBlank()) current.payerAmountInputs
+                    else current.payerAmountInputs + (current.primaryBuyerId to value)
+                }
+                BuyerMode.SELECT_BUYERS -> {
+                    if (current.selectedPayerIds.size == 1) {
+                        val onlyPayerId = current.selectedPayerIds.first()
+                        current.payerAmountInputs + (onlyPayerId to value)
+                    } else {
+                        current.payerAmountInputs
+                    }
+                }
+            }
+            current.copy(amountInput = value, payerAmountInputs = updatedPayerAmounts, errorMessage = null)
+        }
     }
 
     fun onDescriptionChanged(value: String) {
         _uiState.update { it.copy(description = value, errorMessage = null) }
     }
 
-    fun onPayerChanged(value: String) {
+    fun onBuyerModeChanged(mode: BuyerMode) {
         _uiState.update { current ->
+            val primary = current.primaryBuyerId.ifBlank { current.availablePayers.firstOrNull().orEmpty() }
+            when (mode) {
+                BuyerMode.SINGLE_BUYER -> current.copy(
+                    buyerMode = mode,
+                    primaryBuyerId = primary,
+                    selectedPayerIds = if (primary.isBlank()) emptySet() else setOf(primary),
+                    payerAmountInputs = if (primary.isBlank()) emptyMap() else mapOf(primary to current.amountInput),
+                    selectedSplitMemberIds = current.selectedSplitMemberIds + primary,
+                    errorMessage = null
+                )
+                BuyerMode.SELECT_BUYERS -> {
+                    val selected = if (current.selectedPayerIds.isNotEmpty()) current.selectedPayerIds else {
+                        if (primary.isBlank()) emptySet() else setOf(primary)
+                    }
+                    val updatedAmounts = current.payerAmountInputs.toMutableMap().apply {
+                        if (selected.size == 1) {
+                            val onlyPayerId = selected.first()
+                            putIfAbsent(onlyPayerId, current.amountInput)
+                        }
+                    }
+                    current.copy(
+                        buyerMode = mode,
+                        selectedPayerIds = selected,
+                        payerAmountInputs = updatedAmounts,
+                        selectedSplitMemberIds = current.selectedSplitMemberIds + selected,
+                        errorMessage = null
+                    )
+                }
+            }
+        }
+    }
+
+    fun onPayerToggled(value: String, checked: Boolean) {
+        _uiState.update { current ->
+            if (current.buyerMode == BuyerMode.SINGLE_BUYER) return@update current
+
+            val selectedPayers = current.selectedPayerIds.toMutableSet().apply {
+                if (checked) add(value) else remove(value)
+            }
+
+            val payerAmounts = current.payerAmountInputs.toMutableMap().apply {
+                if (checked) {
+                    if (!containsKey(value)) {
+                        val defaultAmount = if (selectedPayers.size == 1) current.amountInput else ""
+                        put(value, defaultAmount)
+                    }
+                } else {
+                    remove(value)
+                }
+            }
+
             current.copy(
-                payerId = value,
-                selectedSplitMemberIds = current.selectedSplitMemberIds + value,
+                selectedPayerIds = selectedPayers,
+                payerAmountInputs = payerAmounts,
+                selectedSplitMemberIds = if (checked) current.selectedSplitMemberIds + value else current.selectedSplitMemberIds,
+                errorMessage = null
+            )
+        }
+    }
+
+    fun onPayerAmountChanged(memberId: String, value: String) {
+        _uiState.update { current ->
+            if (current.buyerMode == BuyerMode.SINGLE_BUYER) return@update current
+            if (!current.selectedPayerIds.contains(memberId)) return@update current
+            current.copy(
+                payerAmountInputs = current.payerAmountInputs + (memberId to value),
                 errorMessage = null
             )
         }
@@ -66,7 +155,11 @@ class AddExpenseViewModel(
             val selected = if (mode == SplitMode.ALL_MEMBERS) {
                 current.availablePayers.toSet()
             } else {
-                (current.selectedSplitMemberIds.ifEmpty { current.availablePayers.toSet() } + current.payerId)
+                val requiredPayers = when (current.buyerMode) {
+                    BuyerMode.SINGLE_BUYER -> setOf(current.primaryBuyerId).filter { it.isNotBlank() }.toSet()
+                    BuyerMode.SELECT_BUYERS -> current.selectedPayerIds
+                }
+                (current.selectedSplitMemberIds.ifEmpty { current.availablePayers.toSet() } + requiredPayers)
             }
             current.copy(splitMode = mode, selectedSplitMemberIds = selected, errorMessage = null)
         }
@@ -74,7 +167,12 @@ class AddExpenseViewModel(
 
     fun onSplitMemberToggled(memberId: String, checked: Boolean) {
         _uiState.update { current ->
-            if (memberId == current.payerId && !checked) {
+            val requiredPayers = when (current.buyerMode) {
+                BuyerMode.SINGLE_BUYER -> setOf(current.primaryBuyerId).filter { it.isNotBlank() }.toSet()
+                BuyerMode.SELECT_BUYERS -> current.selectedPayerIds
+            }
+
+            if (requiredPayers.contains(memberId) && !checked) {
                 return@update current
             }
             val updatedSelection = current.selectedSplitMemberIds.toMutableSet().apply {
@@ -93,15 +191,46 @@ class AddExpenseViewModel(
             return
         }
 
-        if (state.payerId.isBlank()) {
-            _uiState.update { it.copy(errorMessage = "Select a payer") }
-            return
+        val payerContributions = mutableMapOf<String, Double>()
+        if (state.buyerMode == BuyerMode.SINGLE_BUYER) {
+            val primary = state.primaryBuyerId
+            if (primary.isBlank()) {
+                _uiState.update { it.copy(errorMessage = "Select a buyer") }
+                return
+            }
+            payerContributions[primary] = amount
+        } else {
+            if (state.selectedPayerIds.isEmpty()) {
+                _uiState.update { it.copy(errorMessage = "Select at least one payer") }
+                return
+            }
+
+            state.selectedPayerIds.forEach { payerId ->
+                val contribution = state.payerAmountInputs[payerId]?.toDoubleOrNull()
+                if (contribution == null || contribution <= 0.0) {
+                    _uiState.update { it.copy(errorMessage = "Enter valid contribution amounts for all selected payers") }
+                    return
+                }
+                payerContributions[payerId] = contribution
+            }
+
+            val contributionTotal = payerContributions.values.sum()
+            if (kotlin.math.abs(contributionTotal - amount) > 0.009) {
+                _uiState.update { it.copy(errorMessage = "Payer contributions must match total amount") }
+                return
+            }
+        }
+
+        val requiredPayers = if (state.buyerMode == BuyerMode.SINGLE_BUYER) {
+            setOf(state.primaryBuyerId)
+        } else {
+            state.selectedPayerIds
         }
 
         val splitMemberIds = if (state.splitMode == SplitMode.ALL_MEMBERS) {
             state.availablePayers
         } else {
-            (state.selectedSplitMemberIds + state.payerId).toList()
+            (state.selectedSplitMemberIds + requiredPayers).toList()
         }
 
         if (splitMemberIds.isEmpty()) {
@@ -116,8 +245,8 @@ class AddExpenseViewModel(
                 groupId = groupId,
                 amount = amount,
                 description = state.description,
-                paidByUserId = state.payerId,
-                splitMemberIds = splitMemberIds
+                splitMemberIds = splitMemberIds,
+                payerContributions = payerContributions
             ).onSuccess {
                 _uiState.update { it.copy(isLoading = false) }
                 onSuccess()

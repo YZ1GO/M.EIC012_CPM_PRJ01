@@ -1,5 +1,7 @@
 package com.cpm.cleave.ui.features.addexpense
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,22 +12,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuAnchorType
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -33,16 +28,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.rememberScrollState
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit) {
     val uiState by viewModel.uiState.collectAsState()
-    var payerExpanded by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
+
+    val contributionTotal = uiState.selectedPayerIds.sumOf { payerId ->
+        uiState.payerAmountInputs[payerId]?.toDoubleOrNull() ?: 0.0
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(scrollState)
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -56,7 +56,12 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        Column(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, Color(0xFFDCE2EA), RoundedCornerShape(12.dp))
+                .padding(12.dp)
+        ) {
             Text("Amount", fontSize = 14.sp)
             OutlinedTextField(
                 value = uiState.amountInput,
@@ -71,7 +76,12 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Column(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, Color(0xFFDCE2EA), RoundedCornerShape(12.dp))
+                .padding(12.dp)
+        ) {
             Text("Description", fontSize = 14.sp)
             OutlinedTextField(
                 value = uiState.description,
@@ -86,44 +96,98 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Text("Who paid?", fontSize = 14.sp)
-            // TODO(expense-advanced): replace single payer picker with optional multi-payer section and amount inputs.
-            ExposedDropdownMenuBox(
-                expanded = payerExpanded,
-                onExpandedChange = { payerExpanded = !payerExpanded }
-            ) {
-                OutlinedTextField(
-                    value = uiState.payerId,
-                    onValueChange = {},
-                    readOnly = true,
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = payerExpanded) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .menuAnchor(type = ExposedDropdownMenuAnchorType.PrimaryNotEditable),
-                    shape = RoundedCornerShape(8.dp)
-                )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, Color(0xFFDCE2EA), RoundedCornerShape(12.dp))
+                .padding(12.dp)
+        ) {
+            Text("Who paid and how much?", fontSize = 14.sp)
+            Spacer(modifier = Modifier.height(8.dp))
 
-                ExposedDropdownMenu(
-                    expanded = payerExpanded,
-                    onDismissRequest = { payerExpanded = false }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { viewModel.onBuyerModeChanged(BuyerMode.SINGLE_BUYER) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (uiState.buyerMode == BuyerMode.SINGLE_BUYER) Color.Blue else Color.LightGray
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
-                    uiState.availablePayers.forEach { payer ->
-                        DropdownMenuItem(
-                            text = { Text(payer) },
-                            onClick = {
-                                viewModel.onPayerChanged(payer)
-                                payerExpanded = false
+                    Text("You paid", color = Color.White)
+                }
+
+                Button(
+                    onClick = { viewModel.onBuyerModeChanged(BuyerMode.SELECT_BUYERS) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (uiState.buyerMode == BuyerMode.SELECT_BUYERS) Color.Blue else Color.LightGray
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Multiple payers", color = Color.White)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (uiState.buyerMode == BuyerMode.SINGLE_BUYER) {
+                Text(
+                    text = "Buyer: ${uiState.primaryBuyerId.ifBlank { "(unknown)" }} pays full amount",
+                    color = Color.Gray,
+                    fontSize = 12.sp
+                )
+            } else {
+                uiState.availablePayers.forEach { payer ->
+                    val selected = uiState.selectedPayerIds.contains(payer)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Checkbox(
+                            checked = selected,
+                            onCheckedChange = { checked ->
+                                viewModel.onPayerToggled(payer, checked)
                             }
+                        )
+                        Text(
+                            text = payer,
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = uiState.payerAmountInputs[payer].orEmpty(),
+                            onValueChange = { value ->
+                                if (selected) {
+                                    viewModel.onPayerAmountChanged(payer, value)
+                                }
+                            },
+                            enabled = selected,
+                            placeholder = { Text("0.00") },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            singleLine = true
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Contributions: $contributionTotal / ${uiState.amountInput.ifBlank { "0.0" }}",
+                    color = Color.Gray,
+                    fontSize = 12.sp
+                )
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Column(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, Color(0xFFDCE2EA), RoundedCornerShape(12.dp))
+                .padding(12.dp)
+        ) {
             Text("How to split?", fontSize = 14.sp)
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -154,7 +218,11 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
             if (uiState.splitMode == SplitMode.SELECTED_MEMBERS) {
                 Spacer(modifier = Modifier.height(8.dp))
                 uiState.availablePayers.forEach { memberId ->
-                    val isPayer = memberId == uiState.payerId
+                    val isPayer = if (uiState.buyerMode == BuyerMode.SINGLE_BUYER) {
+                        uiState.primaryBuyerId == memberId
+                    } else {
+                        uiState.selectedPayerIds.contains(memberId)
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically

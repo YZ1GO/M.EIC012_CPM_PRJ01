@@ -5,9 +5,11 @@ import androidx.room.withTransaction
 import com.cpm.cleave.data.local.entities.GroupEntity
 import com.cpm.cleave.data.local.entities.GroupMemberEntity
 import com.cpm.cleave.data.local.entities.ExpenseEntity
+import com.cpm.cleave.data.local.entities.ExpensePayerEntity
 import com.cpm.cleave.data.local.entities.ExpenseSplitEntity
 import com.cpm.cleave.data.local.entities.UserEntity
 import com.cpm.cleave.model.Expense
+import com.cpm.cleave.model.PayerContribution
 import com.cpm.cleave.model.ExpenseShare
 import com.cpm.cleave.model.Group
 
@@ -16,6 +18,7 @@ class Cache(context: Context) {
     private val groupDao = database.groupDao()
     private val groupMemberDao = database.groupMemberDao()
     private val expenseDao = database.expenseDao()
+    private val expensePayerDao = database.expensePayerDao()
     private val expenseSplitDao = database.expenseSplitDao()
     private val userDao = database.userDao()
 
@@ -131,20 +134,33 @@ class Cache(context: Context) {
         description: String,
         date: Long,
         groupId: String,
-        paidBy: String,
+        payerContributions: Map<String, Double>,
         memberIds: List<String>
     ) {
         database.withTransaction {
-            ensureUserExists(paidBy)
+            if (payerContributions.isEmpty()) return@withTransaction
+            val primaryPayer = payerContributions.maxByOrNull { it.value }?.key ?: return@withTransaction
+            ensureUserExists(primaryPayer)
             val expense = ExpenseEntity(
                 id = expenseId,
                 amount = amount,
                 description = description,
                 date = date,
                 groupId = groupId,
-                paidBy = paidBy
+                paidBy = primaryPayer
             )
             expenseDao.insertExpense(expense)
+            expensePayerDao.deletePayersForExpense(expenseId)
+            payerContributions.forEach { (userId, paidAmount) ->
+                ensureUserExists(userId)
+                expensePayerDao.insertPayer(
+                    ExpensePayerEntity(
+                        expenseId = expenseId,
+                        userId = userId,
+                        amount = paidAmount
+                    )
+                )
+            }
             expenseSplitDao.deleteSplitsForExpense(expenseId)
 
             if (memberIds.isEmpty()) return@withTransaction
@@ -165,6 +181,7 @@ class Cache(context: Context) {
 
     suspend fun getExpensesByGroup(groupId: String): List<Expense> {
         return expenseDao.getExpensesByGroup(groupId).map { entity ->
+            val payers = expensePayerDao.getPayersForExpense(entity.id)
             Expense(
                 id = entity.id,
                 amount = entity.amount,
@@ -172,7 +189,12 @@ class Cache(context: Context) {
                 date = entity.date,
                 groupId = entity.groupId,
                 paidByUserId = entity.paidBy,
-                imagePath = entity.imagePath
+                imagePath = entity.imagePath,
+                payerContributions = if (payers.isNotEmpty()) {
+                    payers.map { payer -> PayerContribution(userId = payer.userId, amount = payer.amount) }
+                } else {
+                    listOf(PayerContribution(userId = entity.paidBy, amount = entity.amount))
+                }
             )
         }
     }
@@ -186,7 +208,10 @@ class Cache(context: Context) {
             if (groupDao.getGroupById(groupId) == null) return@withTransaction
 
             expenses.forEach { expense ->
-                ensureUserExists(expense.paidByUserId)
+                val payerContributions = expense.payerContributions
+                    .ifEmpty { listOf(PayerContribution(userId = expense.paidByUserId, amount = expense.amount)) }
+                payerContributions.forEach { contribution -> ensureUserExists(contribution.userId) }
+                val primaryPayer = payerContributions.maxByOrNull { it.amount }?.userId ?: expense.paidByUserId
                 expenseDao.insertExpense(
                     ExpenseEntity(
                         id = expense.id,
@@ -194,10 +219,20 @@ class Cache(context: Context) {
                         description = expense.description,
                         date = expense.date,
                         groupId = expense.groupId,
-                        paidBy = expense.paidByUserId,
+                        paidBy = primaryPayer,
                         imagePath = expense.imagePath
                     )
                 )
+                expensePayerDao.deletePayersForExpense(expense.id)
+                payerContributions.forEach { contribution ->
+                    expensePayerDao.insertPayer(
+                        ExpensePayerEntity(
+                            expenseId = expense.id,
+                            userId = contribution.userId,
+                            amount = contribution.amount
+                        )
+                    )
+                }
 
                 val incomingShares = sharesByExpenseId[expense.id].orEmpty()
                 val existingShares = expenseSplitDao.getSplitsForExpense(expense.id)
@@ -241,6 +276,7 @@ class Cache(context: Context) {
 
     suspend fun getExpenseById(expenseId: String): Expense? {
         val entity = expenseDao.getExpenseById(expenseId) ?: return null
+        val payers = expensePayerDao.getPayersForExpense(expenseId)
         return Expense(
             id = entity.id,
             amount = entity.amount,
@@ -248,8 +284,19 @@ class Cache(context: Context) {
             date = entity.date,
             groupId = entity.groupId,
             paidByUserId = entity.paidBy,
-            imagePath = entity.imagePath
+            imagePath = entity.imagePath,
+            payerContributions = if (payers.isNotEmpty()) {
+                payers.map { payer -> PayerContribution(userId = payer.userId, amount = payer.amount) }
+            } else {
+                listOf(PayerContribution(userId = entity.paidBy, amount = entity.amount))
+            }
         )
+    }
+
+    suspend fun getExpensePayersForExpense(expenseId: String): List<PayerContribution> {
+        return expensePayerDao.getPayersForExpense(expenseId).map { payer ->
+            PayerContribution(userId = payer.userId, amount = payer.amount)
+        }
     }
 
     suspend fun addUserToGroup(groupId: String, userId: String): Boolean {

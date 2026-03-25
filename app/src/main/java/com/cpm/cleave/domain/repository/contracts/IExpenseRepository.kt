@@ -12,7 +12,7 @@ interface IExpenseRepository {
         groupId: String,
         amount: Double,
         description: String,
-        paidByUserId: String,
-        splitMemberIds: List<String>
+        splitMemberIds: List<String>,
+        payerContributions: Map<String, Double>
     ): Result<Unit>
 }

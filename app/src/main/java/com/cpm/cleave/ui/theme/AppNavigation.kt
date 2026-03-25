@@ -310,6 +310,7 @@ fun MainScreen(
                     factory = viewModelFactory {
                         initializer {
                             AddExpenseViewModel(
+                                authRepository = authRepository,
                                 getAddExpenseMembersUseCase = GetAddExpenseMembersUseCase(groupRepository),
                                 requestCreateExpenseUseCase = RequestCreateExpenseUseCase(expenseRepository),
                                 groupId = groupId

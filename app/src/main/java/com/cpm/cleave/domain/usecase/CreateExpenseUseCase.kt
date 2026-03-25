@@ -5,7 +5,7 @@ import com.cpm.cleave.model.User
 
 data class CreateExpenseCommand(
     val amount: Double,
-    val paidByUserId: String,
+    val payerContributions: Map<String, Double>,
     val splitMemberIds: List<String>
 )
 
@@ -35,8 +35,21 @@ class CreateExpenseUseCase {
             return Result.failure(IllegalStateException("Current user is not a member of this group."))
         }
 
-        if (!group.members.contains(command.paidByUserId)) {
-            return Result.failure(IllegalArgumentException("Selected payer is not a member of this group."))
+        if (command.payerContributions.isEmpty()) {
+            return Result.failure(IllegalArgumentException("Add at least one payer contribution."))
+        }
+
+        if (command.payerContributions.any { it.value <= 0.0 }) {
+            return Result.failure(IllegalArgumentException("Payer contributions must be greater than zero."))
+        }
+
+        if (!command.payerContributions.keys.all { group.members.contains(it) }) {
+            return Result.failure(IllegalArgumentException("All payers must belong to the group."))
+        }
+
+        val payerTotal = command.payerContributions.values.sum()
+        if (kotlin.math.abs(payerTotal - command.amount) > 0.009) {
+            return Result.failure(IllegalArgumentException("Payer contributions must equal the expense amount."))
         }
 
         if (!command.splitMemberIds.all { group.members.contains(it) }) {

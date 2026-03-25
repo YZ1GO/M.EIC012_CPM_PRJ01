@@ -251,6 +251,20 @@ class AuthRepositoryImpl(
                     SetOptions.merge()
                 ).awaitTaskResult()
 
+                val payers = cache.getExpensePayersForExpense(expense.id)
+                payers.forEach { payer ->
+                    expenseRef.collection("payers").document(payer.userId)
+                        .set(
+                            mapOf(
+                                "userId" to payer.userId,
+                                "amount" to payer.amount,
+                                "updatedAt" to now
+                            ),
+                            SetOptions.merge()
+                        )
+                        .awaitTaskResult()
+                }
+
                 val shares = cache.getExpenseSharesForExpense(expense.id)
                 shares.forEach { share ->
                     expenseRef.collection("splits").document(share.userId)

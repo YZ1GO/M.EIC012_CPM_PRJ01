@@ -3,6 +3,7 @@ package com.cpm.cleave.domain
 import com.cpm.cleave.model.Debt
 import com.cpm.cleave.model.Expense
 import com.cpm.cleave.model.ExpenseShare
+import com.cpm.cleave.model.PayerContribution
 import kotlin.math.round
 
 class DebtCalculator {
@@ -21,7 +22,12 @@ class DebtCalculator {
         val balances = groupMembers.associateWith { 0.0 }.toMutableMap()
 
         expenses.forEach { expense ->
-            balances[expense.paidByUserId] = (balances[expense.paidByUserId] ?: 0.0) + expense.amount
+            val payerContributions = expense.payerContributions.ifEmpty {
+                listOf(PayerContribution(userId = expense.paidByUserId, amount = expense.amount))
+            }
+            payerContributions.forEach { contribution ->
+                balances[contribution.userId] = (balances[contribution.userId] ?: 0.0) + contribution.amount
+            }
 
             val splits = sharesByExpenseId[expense.id].orEmpty()
             splits.forEach { split ->
@@ -42,8 +48,7 @@ class DebtCalculator {
         var creditorIndex = 0
         var debtorIndex = 0
 
-        // TODO(debt-advanced): when multi-payer expenses are supported, add a transitive
-        // simplification pass so chains like A -> B (10) and B -> C (10) become A -> C (10).
+        // Baseline settlement strategy. A later optimization pass can simplify transitive chains.
         while (creditorIndex < creditors.size && debtorIndex < debtors.size) {
             val (creditorId, creditorAmount) = creditors[creditorIndex]
             val (debtorId, debtorAmount) = debtors[debtorIndex]

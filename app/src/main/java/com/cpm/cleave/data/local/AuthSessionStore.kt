@@ -13,6 +13,7 @@ class AuthSessionStore(context: Context) {
     private val userDao = database.userDao()
     private val groupMemberDao = database.groupMemberDao()
     private val expenseDao = database.expenseDao()
+    private val expensePayerDao = database.expensePayerDao()
     private val expenseSplitDao = database.expenseSplitDao()
     private val debtDao = database.debtDao()
     private val paymentDao = database.paymentDao()
@@ -151,6 +152,7 @@ class AuthSessionStore(context: Context) {
                     }
 
                     expenseDao.reassignPaidByUser(oldUserId, registeredUserId)
+                    expensePayerDao.reassignUser(oldUserId, registeredUserId)
                     expenseSplitDao.reassignUser(oldUserId, registeredUserId)
                     debtDao.reassignFromUser(oldUserId, registeredUserId)
                     debtDao.reassignToUser(oldUserId, registeredUserId)

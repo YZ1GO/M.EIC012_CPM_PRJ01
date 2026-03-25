@@ -11,6 +11,7 @@ import com.cpm.cleave.domain.usecase.JoinGroupUseCase
 import com.cpm.cleave.domain.usecase.PrepareGroupCreationCommand
 import com.cpm.cleave.domain.usecase.PrepareGroupCreationUseCase
 import com.cpm.cleave.model.Expense
+import com.cpm.cleave.model.PayerContribution
 import com.cpm.cleave.model.ExpenseShare
 import com.cpm.cleave.model.Group
 import com.google.android.gms.tasks.Task
@@ -551,14 +552,34 @@ class GroupRepositoryImpl(
         val sharesByExpenseId = mutableMapOf<String, List<ExpenseShare>>()
 
         for (expenseDoc in expensesSnapshot.documents) {
+            val payersSnapshot = firestore.collection("groups")
+                .document(groupId)
+                .collection("expenses")
+                .document(expenseDoc.id)
+                .collection("payers")
+                .get()
+                .awaitTaskResult()
+
+            val payerContributions = payersSnapshot.documents.mapNotNull { payerDoc ->
+                val userId = payerDoc.getString("userId") ?: return@mapNotNull null
+                val contributionAmount = payerDoc.getDouble("amount") ?: 0.0
+                PayerContribution(userId = userId, amount = contributionAmount)
+            }
+            val legacyPaidBy = expenseDoc.getString("paidByUserId") ?: ""
+
             val expense = Expense(
                 id = expenseDoc.id,
                 amount = (expenseDoc.getDouble("amount") ?: 0.0),
                 description = expenseDoc.getString("description") ?: "",
                 date = expenseDoc.getLong("date") ?: 0L,
                 groupId = expenseDoc.getString("groupId") ?: groupId,
-                paidByUserId = expenseDoc.getString("paidByUserId") ?: "",
-                imagePath = expenseDoc.getString("imagePath")
+                paidByUserId = legacyPaidBy,
+                imagePath = expenseDoc.getString("imagePath"),
+                payerContributions = if (payerContributions.isNotEmpty()) {
+                    payerContributions
+                } else {
+                    listOf(PayerContribution(userId = legacyPaidBy, amount = (expenseDoc.getDouble("amount") ?: 0.0)))
+                }
             )
             expenses.add(expense)
 

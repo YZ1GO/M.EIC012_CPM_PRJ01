@@ -5,12 +5,19 @@ enum class SplitMode {
     SELECTED_MEMBERS
 }
 
-// TODO(expense-advanced): add multi-payer support (e.g. A pays 60, B pays 40) with per-payer contributions.
+enum class BuyerMode {
+    SINGLE_BUYER,
+    SELECT_BUYERS
+}
+
 data class AddExpenseUiState(
     val amountInput: String = "",
     val description: String = "",
-    val payerId: String = "",
     val availablePayers: List<String> = emptyList(),
+    val buyerMode: BuyerMode = BuyerMode.SINGLE_BUYER,
+    val primaryBuyerId: String = "",
+    val selectedPayerIds: Set<String> = emptySet(),
+    val payerAmountInputs: Map<String, String> = emptyMap(),
     val splitMode: SplitMode = SplitMode.ALL_MEMBERS,
     val selectedSplitMemberIds: Set<String> = emptySet(),
     val isLoading: Boolean = false,

@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,6 +44,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.cpm.cleave.model.Group
+import com.cpm.cleave.model.Expense
 
 @Composable
 fun GroupsScreen(groupsViewModel: GroupsViewModel, onGroupClick: (String) -> Unit) {
@@ -177,6 +180,7 @@ fun GroupDetailsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -190,46 +194,71 @@ fun GroupDetailsScreen(
             return@Column
         }
 
-        Text("Name: ${currentGroup.name}")
-        Text("Currency: ${currentGroup.currency}")
-        Text("Code: ${currentGroup.joinCode}")
-        Spacer(modifier = Modifier.height(8.dp))
-        Text("Members (${currentGroup.members.size})", fontWeight = FontWeight.Medium)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, Color(0xFFDCE2EA), RoundedCornerShape(12.dp))
+                .padding(12.dp)
+        ) {
+            Text("Name: ${currentGroup.name}")
+            Text("Currency: ${currentGroup.currency}")
+            Text("Code: ${currentGroup.joinCode}")
+        }
 
-        if (currentGroup.members.isEmpty()) {
-            Text("No members in this group yet.")
-        } else {
-            currentGroup.members.forEach { memberId ->
-                Text("- $memberId", color = Color.Gray)
+        Spacer(modifier = Modifier.height(8.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, Color(0xFFDCE2EA), RoundedCornerShape(12.dp))
+                .padding(12.dp)
+        ) {
+            Text("Members (${currentGroup.members.size})", fontWeight = FontWeight.Medium)
+
+            if (currentGroup.members.isEmpty()) {
+                Text("No members in this group yet.")
+            } else {
+                currentGroup.members.forEach { memberId ->
+                    Text("- $memberId", color = Color.Gray)
+                }
             }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
-        Text("Expenses (${uiState.expenses.size})", fontWeight = FontWeight.Medium)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, Color(0xFFDCE2EA), RoundedCornerShape(12.dp))
+                .padding(12.dp)
+        ) {
+            Text("Expenses (${uiState.expenses.size})", fontWeight = FontWeight.Medium)
 
-        if (uiState.expenses.isEmpty()) {
-            Text("No expenses yet.")
-        } else {
-            uiState.expenses.forEach { expense ->
-                val desc = expense.description.ifBlank { "(No description)" }
-                Text(
-                    text = "- $desc: ${expense.amount} (${expense.paidByUserId})",
-                    color = Color.Gray
-                )
+            if (uiState.expenses.isEmpty()) {
+                Text("No expenses yet.")
+            } else {
+                uiState.expenses.forEach { expense ->
+                    ExpenseDetailsItem(expense = expense)
+                }
             }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
-        Text("Debts (${uiState.debts.size})", fontWeight = FontWeight.Medium)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, Color(0xFFDCE2EA), RoundedCornerShape(12.dp))
+                .padding(12.dp)
+        ) {
+            Text("Debts (${uiState.debts.size})", fontWeight = FontWeight.Medium)
 
-        if (uiState.debts.isEmpty()) {
-            Text("No debts yet.")
-        } else {
-            uiState.debts.forEach { debt ->
-                Text(
-                    text = "- ${debt.fromUser} owes ${debt.toUser}: ${debt.amount}",
-                    color = Color.Gray
-                )
+            if (uiState.debts.isEmpty()) {
+                Text("No debts yet.")
+            } else {
+                uiState.debts.forEach { debt ->
+                    Text(
+                        text = "- ${debt.fromUser} owes ${debt.toUser}: ${debt.amount}",
+                        color = Color.Gray
+                    )
+                }
             }
         }
 
@@ -242,5 +271,22 @@ fun GroupDetailsScreen(
         ) {
             Text("Add Expense", color = Color.White)
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun ExpenseDetailsItem(expense: Expense) {
+    val desc = expense.description.ifBlank { "(No description)" }
+    val payerText = expense.payerContributions
+        .joinToString(separator = ", ") { payer -> "${payer.userId}: ${payer.amount}" }
+        .ifBlank { expense.paidByUserId }
+
+    Column(modifier = Modifier.padding(vertical = 6.dp)) {
+        Text(text = desc, fontWeight = FontWeight.Medium)
+        Text(text = "Total: ${expense.amount}", color = Color.Gray, fontSize = 13.sp)
+        Text(text = "Payers: $payerText", color = Color.Gray, fontSize = 13.sp)
+        Text(text = "Date: ${expense.date}", color = Color.Gray, fontSize = 12.sp)
     }
 }

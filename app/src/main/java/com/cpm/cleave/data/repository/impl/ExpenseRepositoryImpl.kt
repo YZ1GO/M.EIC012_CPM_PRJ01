@@ -11,6 +11,7 @@ import com.cpm.cleave.domain.usecase.CreateExpenseUseCase
 import com.cpm.cleave.model.Debt
 import com.cpm.cleave.model.Expense
 import com.cpm.cleave.model.ExpenseShare
+import com.cpm.cleave.model.PayerContribution
 import com.google.android.gms.tasks.Task
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -151,6 +152,9 @@ class ExpenseRepositoryImpl(
             participantIds.addAll(group.members)
             expenses.forEach { expense ->
                 participantIds.add(expense.paidByUserId)
+                expense.payerContributions.forEach { contribution ->
+                    participantIds.add(contribution.userId)
+                }
                 sharesByExpenseId[expense.id].orEmpty().forEach { share ->
                     participantIds.add(share.userId)
                 }
@@ -172,17 +176,18 @@ class ExpenseRepositoryImpl(
         groupId: String,
         amount: Double,
         description: String,
-        paidByUserId: String,
-        splitMemberIds: List<String>
+        splitMemberIds: List<String>,
+        payerContributions: Map<String, Double>
     ): Result<Unit> {
-        // TODO(expense-advanced): support multi-payer expenses by accepting payer contributions and validating sum == total.
         return try {
             val currentUser = authSessionStore.getActiveUser()
             val group = cache.getGroupById(groupId)
+            val normalizedContributions = payerContributions
+                .filterValues { it > 0.0 }
 
             val command = CreateExpenseCommand(
                 amount = amount,
-                paidByUserId = paidByUserId,
+                payerContributions = normalizedContributions,
                 splitMemberIds = splitMemberIds
             )
             createExpenseUseCase.execute(
@@ -200,7 +205,7 @@ class ExpenseRepositoryImpl(
                 description = description,
                 date = now,
                 groupId = groupId,
-                paidBy = paidByUserId,
+                payerContributions = normalizedContributions,
                 memberIds = splitMemberIds
             )
 
@@ -219,8 +224,8 @@ class ExpenseRepositoryImpl(
                         amount = amount,
                         description = description,
                         date = now,
-                        paidByUserId = paidByUserId,
-                        splitMemberIds = splitMemberIds
+                        splitMemberIds = splitMemberIds,
+                        payerContributions = normalizedContributions
                     )
                     true
                 } ?: false
@@ -247,6 +252,9 @@ class ExpenseRepositoryImpl(
                 return@forEach
             }
             val shares = cache.getExpenseSharesForExpense(localExpense.id)
+            val payers = localExpense.payerContributions.ifEmpty {
+                listOf(PayerContribution(userId = localExpense.paidByUserId, amount = localExpense.amount))
+            }
 
             val syncSucceeded = runCatching {
                 withTimeoutOrNull(4000L) {
@@ -256,8 +264,8 @@ class ExpenseRepositoryImpl(
                         amount = localExpense.amount,
                         description = localExpense.description,
                         date = localExpense.date,
-                        paidByUserId = localExpense.paidByUserId,
-                        splitMemberIds = shares.map { it.userId }
+                        splitMemberIds = shares.map { it.userId },
+                        payerContributions = payers.associate { it.userId to it.amount }
                     )
                     true
                 } ?: false
@@ -282,14 +290,34 @@ class ExpenseRepositoryImpl(
         val sharesByExpenseId = mutableMapOf<String, List<ExpenseShare>>()
 
         for (expenseDoc in expensesSnapshot.documents) {
+            val payersSnapshot = firestore.collection("groups")
+                .document(groupId)
+                .collection("expenses")
+                .document(expenseDoc.id)
+                .collection("payers")
+                .get()
+                .awaitTaskResult()
+
+            val payerContributions = payersSnapshot.documents.mapNotNull { payerDoc ->
+                val userId = payerDoc.getString("userId") ?: return@mapNotNull null
+                val contribution = payerDoc.getDouble("amount") ?: 0.0
+                PayerContribution(userId = userId, amount = contribution)
+            }
+
+            val legacyPaidBy = expenseDoc.getString("paidByUserId") ?: ""
             val expense = Expense(
                 id = expenseDoc.id,
                 amount = (expenseDoc.getDouble("amount") ?: 0.0),
                 description = expenseDoc.getString("description") ?: "",
                 date = expenseDoc.getLong("date") ?: 0L,
                 groupId = expenseDoc.getString("groupId") ?: groupId,
-                paidByUserId = expenseDoc.getString("paidByUserId") ?: "",
-                imagePath = expenseDoc.getString("imagePath")
+                paidByUserId = legacyPaidBy,
+                imagePath = expenseDoc.getString("imagePath"),
+                payerContributions = if (payerContributions.isNotEmpty()) {
+                    payerContributions
+                } else {
+                    listOf(PayerContribution(userId = legacyPaidBy, amount = (expenseDoc.getDouble("amount") ?: 0.0)))
+                }
             )
             expenses.add(expense)
 
@@ -318,12 +346,13 @@ class ExpenseRepositoryImpl(
         amount: Double,
         description: String,
         date: Long,
-        paidByUserId: String,
-        splitMemberIds: List<String>
+        splitMemberIds: List<String>,
+        payerContributions: Map<String, Double>
     ) {
         val now = System.currentTimeMillis()
         val groupRef = firestore.collection("groups").document(groupId)
         val expenseRef = groupRef.collection("expenses").document(expenseId)
+        val primaryPayerId = payerContributions.maxByOrNull { it.value }?.key.orEmpty()
 
         val batch = firestore.batch()
         batch.set(
@@ -333,11 +362,24 @@ class ExpenseRepositoryImpl(
                 "description" to description,
                 "date" to date,
                 "groupId" to groupId,
-                "paidByUserId" to paidByUserId,
+                "paidByUserId" to primaryPayerId,
                 "updatedAt" to now
             ),
             SetOptions.merge()
         )
+
+        payerContributions.forEach { (payerId, contributionAmount) ->
+            val payerRef = expenseRef.collection("payers").document(payerId)
+            batch.set(
+                payerRef,
+                mapOf(
+                    "userId" to payerId,
+                    "amount" to contributionAmount,
+                    "updatedAt" to now
+                ),
+                SetOptions.merge()
+            )
+        }
 
         if (splitMemberIds.isNotEmpty()) {
             val splitAmount = amount / splitMemberIds.size

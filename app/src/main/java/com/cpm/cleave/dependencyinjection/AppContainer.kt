@@ -8,6 +8,7 @@ import com.cpm.cleave.data.local.PendingSyncStore
 import com.cpm.cleave.data.repository.impl.AuthRepositoryImpl
 import com.cpm.cleave.data.repository.impl.ExpenseRepositoryImpl
 import com.cpm.cleave.data.repository.impl.GroupRepositoryImpl
+import com.cpm.cleave.domain.usecase.CalculateDebtsUseCase
 
 class AppContainer(context: Context) {
     private val appContext = context.applicationContext
@@ -16,6 +17,9 @@ class AppContainer(context: Context) {
     private val authSessionStore = AuthSessionStore(appContext)
     private val pendingSyncStore = PendingSyncStore(appContext)
     private val connectivityStatus = ConnectivityStatus(appContext)
+    private val calculateDebtsUseCase = CalculateDebtsUseCase(
+        enableOptimizedSettlement = ENABLE_OPTIMIZED_SETTLEMENT
+    )
 
     val authRepository = AuthRepositoryImpl(
         authSessionStore = authSessionStore,
@@ -31,6 +35,11 @@ class AppContainer(context: Context) {
         cache = cache,
         authSessionStore = authSessionStore,
         pendingSyncStore = pendingSyncStore,
-        connectivityStatus = connectivityStatus
+        connectivityStatus = connectivityStatus,
+        calculateDebtsUseCase = calculateDebtsUseCase
     )
+
+    companion object {
+        private const val ENABLE_OPTIMIZED_SETTLEMENT = true
+    }
 }
