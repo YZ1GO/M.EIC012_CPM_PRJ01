@@ -135,7 +135,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                 Button(
                     onClick = { viewModel.onBuyerModeChanged(BuyerMode.SINGLE_BUYER) },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (uiState.buyerMode == BuyerMode.SINGLE_BUYER) Color.Blue else Color.LightGray
+                        containerColor = if (uiState.buyerMode == BuyerMode.SINGLE_BUYER) Color.Blue else Color.Gray
                     ),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.weight(1f)
@@ -146,7 +146,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                 Button(
                     onClick = { viewModel.onBuyerModeChanged(BuyerMode.SELECT_BUYERS) },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (uiState.buyerMode == BuyerMode.SELECT_BUYERS) Color.Blue else Color.LightGray
+                        containerColor = if (uiState.buyerMode == BuyerMode.SELECT_BUYERS) Color.Blue else Color.Gray
                     ),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.weight(1f)
@@ -236,7 +236,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                 Button(
                     onClick = { viewModel.onSplitModeChanged(SplitMode.ALL_MEMBERS) },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (uiState.splitMode == SplitMode.ALL_MEMBERS) Color.Blue else Color.LightGray
+                        containerColor = if (uiState.splitMode == SplitMode.ALL_MEMBERS) Color.Blue else Color.Gray
                     ),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.weight(1f)
@@ -247,7 +247,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                 Button(
                     onClick = { viewModel.onSplitModeChanged(SplitMode.SELECTED_MEMBERS) },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (uiState.splitMode == SplitMode.SELECTED_MEMBERS) Color.Blue else Color.LightGray
+                        containerColor = if (uiState.splitMode == SplitMode.SELECTED_MEMBERS) Color.Blue else Color.Gray
                     ),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.weight(1f)
