@@ -85,6 +85,7 @@ class AuthRepositoryImpl(
         return try {
             val firebaseUser = firebaseAuth.currentUser
             if (firebaseUser != null && !firebaseUser.isAnonymous) {
+                android.util.Log.e("AuthRepo", "Non-anonymous user already signed in: ${'$'}{firebaseUser.uid}")
                 return Result.failure(IllegalStateException("A registered user is already signed in."))
             }
 
@@ -94,20 +95,38 @@ class AuthRepositoryImpl(
                 .user
                 ?: return Result.failure(IllegalStateException("Could not create anonymous session."))
 
+
+            val resolvedName = (anonymousFirebaseUser.displayName ?: defaultName).ifBlank { "Guest" }
             val anonymousUser = authSessionStore.activateAnonymousUserSession(
                 anonymousUserId = anonymousFirebaseUser.uid,
-                anonymousName = anonymousFirebaseUser.displayName ?: defaultName
+                anonymousName = resolvedName
             )
 
-            ensureUserDocument(
-                uid = anonymousUser.id,
-                name = anonymousUser.name,
-                email = null,
-                isAnonymous = true
+            // Wait to ensure auth session is established
+            kotlinx.coroutines.delay(250)
+
+
+            val currentUid = firebaseAuth.currentUser?.uid
+            android.util.Log.d("AuthRepo", "Current Firebase UID: $currentUid, Target UID: ${anonymousUser.id}, Name: '${anonymousUser.name}'")
+
+            val payload = mapOf(
+                "name" to anonymousUser.name,
+                "email" to null,
+                "isAnonymous" to true,
+                "lastSeen" to System.currentTimeMillis()
             )
+            android.util.Log.d("AuthRepo", "Payload for Firestore: $payload")
+
+            firestore.collection("users")
+                .document(anonymousUser.id)
+                .set(payload, com.google.firebase.firestore.SetOptions.merge())
+                .awaitTaskResult()
+
+            Result.success(anonymousUser)
 
             Result.success(anonymousUser)
         } catch (e: Exception) {
+            android.util.Log.e("AuthRepo", "Error in getOrCreateAnonymousUser: ", e)
             Result.failure(e)
         }
     }
@@ -125,6 +144,11 @@ class AuthRepositoryImpl(
 
             // Capture old anonymous user ID before authentication.
             val oldAnonymousUser = authSessionStore.getActiveUser()
+            val oldAnonymousGroupIds = if (oldAnonymousUser != null && oldAnonymousUser.isAnonymous) {
+                cache.loadGroups(oldAnonymousUser.id).map { it.id }.toSet()
+            } else {
+                emptySet()
+            }
 
             if (!mergeAnonymousData && oldAnonymousUser != null && oldAnonymousUser.isAnonymous) {
                 val requiresMerge = hasAnonymousFinancialFootprint(oldAnonymousUser.id)
@@ -133,6 +157,12 @@ class AuthRepositoryImpl(
                         IllegalStateException("You have guest expense data that affects balances. Enable merge to continue.")
                     )
                 }
+            }
+
+            // If user chose not to merge guest data, remove anonymous memberships now while still
+            // authenticated as the anonymous user so Firestore security rules allow the deletions.
+            if (!mergeAnonymousData && oldAnonymousUser != null && oldAnonymousUser.isAnonymous) {
+                removeAnonymousUserFromAllGroupsInFirestore(oldAnonymousUser.id, oldAnonymousGroupIds)
             }
 
             val authResult = firebaseAuth
@@ -162,9 +192,7 @@ class AuthRepositoryImpl(
             )
 
             if (mergeAnonymousData && oldAnonymousUser != null && oldAnonymousUser.isAnonymous && oldAnonymousUser.id != user.uid) {
-                reassignAnonymousToRegisteredUserInFirestore(oldAnonymousUser.id, user.uid)
-            } else if (!mergeAnonymousData && oldAnonymousUser != null && oldAnonymousUser.isAnonymous) {
-                removeAnonymousUserFromAllGroupsInFirestore(oldAnonymousUser.id)
+                reassignAnonymousToRegisteredUserInFirestore(oldAnonymousUser.id, user.uid, oldAnonymousGroupIds)
             }
 
             Result.success(mergedUser)
@@ -184,6 +212,11 @@ class AuthRepositoryImpl(
 
             // Capture old anonymous user ID before authentication
             val oldAnonymousUser = authSessionStore.getActiveUser()
+            val oldAnonymousGroupIds = if (oldAnonymousUser != null && oldAnonymousUser.isAnonymous) {
+                cache.loadGroups(oldAnonymousUser.id).map { it.id }.toSet()
+            } else {
+                emptySet()
+            }
 
             if (!mergeAnonymousData && oldAnonymousUser != null && oldAnonymousUser.isAnonymous) {
                 val requiresMerge = hasAnonymousFinancialFootprint(oldAnonymousUser.id)
@@ -192,6 +225,12 @@ class AuthRepositoryImpl(
                         IllegalStateException("You have guest expense data that affects balances. Enable merge to continue.")
                     )
                 }
+            }
+
+            // If user chose not to merge guest data, remove anonymous memberships now while still
+            // authenticated as the anonymous user so Firestore security rules allow the deletions.
+            if (!mergeAnonymousData && oldAnonymousUser != null && oldAnonymousUser.isAnonymous) {
+                removeAnonymousUserFromAllGroupsInFirestore(oldAnonymousUser.id, oldAnonymousGroupIds)
             }
 
             val authResult = firebaseAuth
@@ -215,10 +254,7 @@ class AuthRepositoryImpl(
             )
 
             if (mergeAnonymousData && oldAnonymousUser != null && oldAnonymousUser.isAnonymous && oldAnonymousUser.id != user.uid) {
-                reassignAnonymousToRegisteredUserInFirestore(oldAnonymousUser.id, user.uid)
-            } else if (!mergeAnonymousData && oldAnonymousUser != null && oldAnonymousUser.isAnonymous) {
-                // Clean up orphaned anonymous user from all groups
-                removeAnonymousUserFromAllGroupsInFirestore(oldAnonymousUser.id)
+                reassignAnonymousToRegisteredUserInFirestore(oldAnonymousUser.id, user.uid, oldAnonymousGroupIds)
             }
 
             Result.success(mergedUser)
@@ -236,6 +272,11 @@ class AuthRepositoryImpl(
 
             // Capture old anonymous user ID before authentication
             val oldAnonymousUser = authSessionStore.getActiveUser()
+            val oldAnonymousGroupIds = if (oldAnonymousUser != null && oldAnonymousUser.isAnonymous) {
+                cache.loadGroups(oldAnonymousUser.id).map { it.id }.toSet()
+            } else {
+                emptySet()
+            }
 
             if (!mergeAnonymousData && oldAnonymousUser != null && oldAnonymousUser.isAnonymous) {
                 val requiresMerge = hasAnonymousFinancialFootprint(oldAnonymousUser.id)
@@ -244,6 +285,12 @@ class AuthRepositoryImpl(
                         IllegalStateException("You have guest expense data that affects balances. Enable merge to continue.")
                     )
                 }
+            }
+
+            // If user chose not to merge guest data, remove anonymous memberships now while still
+            // authenticated as the anonymous user so Firestore security rules allow the deletions.
+            if (!mergeAnonymousData && oldAnonymousUser != null && oldAnonymousUser.isAnonymous) {
+                removeAnonymousUserFromAllGroupsInFirestore(oldAnonymousUser.id, oldAnonymousGroupIds)
             }
 
             val credential = GoogleAuthProvider.getCredential(idToken, null)
@@ -265,10 +312,7 @@ class AuthRepositoryImpl(
             )
 
             if (mergeAnonymousData && oldAnonymousUser != null && oldAnonymousUser.isAnonymous && oldAnonymousUser.id != user.uid) {
-                reassignAnonymousToRegisteredUserInFirestore(oldAnonymousUser.id, user.uid)
-            } else if (!mergeAnonymousData && oldAnonymousUser != null && oldAnonymousUser.isAnonymous) {
-                // Clean up orphaned anonymous user from all groups
-                removeAnonymousUserFromAllGroupsInFirestore(oldAnonymousUser.id)
+                reassignAnonymousToRegisteredUserInFirestore(oldAnonymousUser.id, user.uid, oldAnonymousGroupIds)
             }
 
             Result.success(mergedUser)
@@ -414,63 +458,71 @@ class AuthRepositoryImpl(
 
     private suspend fun reassignAnonymousToRegisteredUserInFirestore(
         oldUserId: String,
-        newUserId: String
+        newUserId: String,
+        candidateGroupIds: Set<String>
     ) {
         val now = System.currentTimeMillis()
 
-        // Query all groups to find those with oldUserId as member
-        val groupsSnapshot = firestore.collection("groups")
-            .get()
-            .awaitTaskResult()
+        if (candidateGroupIds.isEmpty()) return
 
-        var batch = firestore.batch()
-        var operationCount = 0
         val MAX_BATCH_SIZE = 450 // Keep below Firestore 500-operation limit
 
-        val processedGroupIds = mutableSetOf<String>()
-
-        groupsSnapshot.documents.forEach { groupDoc ->
-            val groupId = groupDoc.id
-            processedGroupIds.add(groupId)
-
-            // Reassign member doc: oldUserId → newUserId
-            val memberSnapshot = groupDoc.reference.collection("members").document(oldUserId).get().awaitTaskResult()
+        // Phase 1: Ensure the registered user has member documents for all groups where the
+        // anonymous user was a member. We commit these sets first so the registered user becomes
+        // a member and subsequent operations (deletes/updates) are permitted by security rules.
+        var firstBatch = firestore.batch()
+        var firstOpCount = 0
+        candidateGroupIds.forEach { groupId ->
+            val groupRef = firestore.collection("groups").document(groupId)
+            val memberSnapshot = groupRef.collection("members").document(oldUserId).get().awaitTaskResult()
             if (memberSnapshot.exists()) {
-                if (operationCount >= MAX_BATCH_SIZE) {
-                    // Execute current batch and start a new one
-                    batch.commit().awaitTaskResult()
-                    batch = firestore.batch()
-                    operationCount = 0
+                // Create new member doc for the registered user (allowed when request.auth.uid == newUserId)
+                if (firstOpCount >= MAX_BATCH_SIZE) {
+                    firstBatch.commit().awaitTaskResult()
+                    firstBatch = firestore.batch()
+                    firstOpCount = 0
                 }
-
-                // Delete old member doc and create new one
-                batch.delete(memberSnapshot.reference)
-                batch.set(
-                    groupDoc.reference.collection("members").document(newUserId),
+                firstBatch.set(
+                    groupRef.collection("members").document(newUserId),
                     mapOf(
                         "userId" to newUserId,
                         "updatedAt" to now
                     ),
                     SetOptions.merge()
                 )
-                operationCount += 2
+                firstOpCount += 1
             }
+        }
+        if (firstOpCount > 0) {
+            firstBatch.commit().awaitTaskResult()
+        }
+
+        // Phase 2: Now that the registered user is a member, perform reassignments and remove
+        // the anonymous member documents. These operations require the requester to be a group
+        // member and so will succeed now.
+        var secondBatch = firestore.batch()
+        var secondOpCount = 0
+        candidateGroupIds.forEach { groupId ->
+            val groupRef = firestore.collection("groups").document(groupId)
+            // Only operate on groups where the anonymous user was present
+            val memberSnapshot = groupRef.collection("members").document(oldUserId).get().awaitTaskResult()
+            if (!memberSnapshot.exists()) return@forEach
 
             // Find all expenses with oldUserId as paidByUserId and reassign payer/split docs
-            val expensesSnapshot = groupDoc.reference.collection("expenses").get().awaitTaskResult()
+            val expensesSnapshot = groupRef.collection("expenses").get().awaitTaskResult()
             expensesSnapshot.documents.forEach { expenseDoc ->
                 val paidByUserId = expenseDoc.getString("paidByUserId")
 
                 // Reassign payer doc if oldUserId is the payer
                 val payerSnapshot = expenseDoc.reference.collection("payers").document(oldUserId).get().awaitTaskResult()
                 if (payerSnapshot.exists()) {
-                    if (operationCount >= MAX_BATCH_SIZE) {
-                        batch.commit().awaitTaskResult()
-                        batch = firestore.batch()
-                        operationCount = 0
+                    if (secondOpCount >= MAX_BATCH_SIZE) {
+                        secondBatch.commit().awaitTaskResult()
+                        secondBatch = firestore.batch()
+                        secondOpCount = 0
                     }
-                    batch.delete(payerSnapshot.reference)
-                    batch.set(
+                    secondBatch.delete(payerSnapshot.reference)
+                    secondBatch.set(
                         expenseDoc.reference.collection("payers").document(newUserId),
                         mapOf(
                             "userId" to newUserId,
@@ -479,19 +531,19 @@ class AuthRepositoryImpl(
                         ),
                         SetOptions.merge()
                     )
-                    operationCount += 2
+                    secondOpCount += 2
                 }
 
                 // Reassign split doc for oldUserId
                 val splitSnapshot = expenseDoc.reference.collection("splits").document(oldUserId).get().awaitTaskResult()
                 if (splitSnapshot.exists()) {
-                    if (operationCount >= MAX_BATCH_SIZE) {
-                        batch.commit().awaitTaskResult()
-                        batch = firestore.batch()
-                        operationCount = 0
+                    if (secondOpCount >= MAX_BATCH_SIZE) {
+                        secondBatch.commit().awaitTaskResult()
+                        secondBatch = firestore.batch()
+                        secondOpCount = 0
                     }
-                    batch.delete(splitSnapshot.reference)
-                    batch.set(
+                    secondBatch.delete(splitSnapshot.reference)
+                    secondBatch.set(
                         expenseDoc.reference.collection("splits").document(newUserId),
                         mapOf(
                             "userId" to newUserId,
@@ -500,80 +552,74 @@ class AuthRepositoryImpl(
                         ),
                         SetOptions.merge()
                     )
-                    operationCount += 2
+                    secondOpCount += 2
                 }
 
                 // Reassign expense's paidByUserId if it was the oldUserId
                 if (paidByUserId == oldUserId) {
-                    if (operationCount >= MAX_BATCH_SIZE) {
-                        batch.commit().awaitTaskResult()
-                        batch = firestore.batch()
-                        operationCount = 0
+                    if (secondOpCount >= MAX_BATCH_SIZE) {
+                        secondBatch.commit().awaitTaskResult()
+                        secondBatch = firestore.batch()
+                        secondOpCount = 0
                     }
-                    batch.update(
+                    secondBatch.update(
                         expenseDoc.reference,
                         mapOf("paidByUserId" to newUserId, "updatedAt" to now)
                     )
-                    operationCount += 1
+                    secondOpCount += 1
                 }
+            }
+
+            // Finally remove the old anonymous member doc
+            val oldMemberSnapshot = groupRef.collection("members").document(oldUserId).get().awaitTaskResult()
+            if (oldMemberSnapshot.exists()) {
+                if (secondOpCount >= MAX_BATCH_SIZE) {
+                    secondBatch.commit().awaitTaskResult()
+                    secondBatch = firestore.batch()
+                    secondOpCount = 0
+                }
+                secondBatch.delete(oldMemberSnapshot.reference)
+                secondOpCount += 1
             }
         }
 
-        // Update old user document: mark as migrated
-        if (operationCount >= MAX_BATCH_SIZE) {
-            batch.commit().awaitTaskResult()
-            batch = firestore.batch()
-            operationCount = 0
+        if (secondOpCount > 0) {
+            secondBatch.commit().awaitTaskResult()
         }
-        batch.update(
-            firestore.collection("users").document(oldUserId),
-            mapOf(
-                "isAnonymous" to false,
-                "lastSeen" to now,
-                "migratedToUserId" to newUserId
-            )
-        )
-
-        // Execute final batch
-        batch.commit().awaitTaskResult()
     }
 
     private suspend fun hasAnonymousFinancialFootprint(anonymousUserId: String): Boolean {
-        val paidExpense = firestore.collectionGroup("expenses")
-            .whereEqualTo("paidByUserId", anonymousUserId)
-            .limit(1)
-            .get()
-            .awaitTaskResult()
-        if (!paidExpense.isEmpty) return true
-
-        val payerEntry = firestore.collectionGroup("payers")
-            .whereEqualTo("userId", anonymousUserId)
-            .limit(1)
-            .get()
-            .awaitTaskResult()
-        if (!payerEntry.isEmpty) return true
-
-        val splitEntry = firestore.collectionGroup("splits")
-            .whereEqualTo("userId", anonymousUserId)
-            .limit(1)
-            .get()
-            .awaitTaskResult()
-
-        return !splitEntry.isEmpty
+        val groups = cache.loadGroups(anonymousUserId)
+        for (group in groups) {
+            val expenses = cache.getExpensesByGroup(group.id)
+            if (expenses.any { expense ->
+                    expense.paidByUserId == anonymousUserId ||
+                        expense.payerContributions.any { it.userId == anonymousUserId }
+                }) {
+                return true
+            }
+            if (expenses.any { expense ->
+                    cache.getExpenseSharesForExpense(expense.id).any { it.userId == anonymousUserId }
+                }) {
+                return true
+            }
+        }
+        return false
     }
 
-    private suspend fun removeAnonymousUserFromAllGroupsInFirestore(anonymousUserId: String) {
-        // Query all groups to find those with anonymousUserId as member
-        val groupsSnapshot = firestore.collection("groups")
-            .get()
-            .awaitTaskResult()
+    private suspend fun removeAnonymousUserFromAllGroupsInFirestore(
+        anonymousUserId: String,
+        candidateGroupIds: Set<String>
+    ) {
+        if (candidateGroupIds.isEmpty()) return
 
         var batch = firestore.batch()
         var operationCount = 0
         val MAX_BATCH_SIZE = 450
 
-        groupsSnapshot.documents.forEach { groupDoc ->
-            val memberSnapshot = groupDoc.reference.collection("members").document(anonymousUserId).get().awaitTaskResult()
+        candidateGroupIds.forEach { groupId ->
+            val groupRef = firestore.collection("groups").document(groupId)
+            val memberSnapshot = groupRef.collection("members").document(anonymousUserId).get().awaitTaskResult()
             if (memberSnapshot.exists()) {
                 if (operationCount >= MAX_BATCH_SIZE) {
                     batch.commit().awaitTaskResult()

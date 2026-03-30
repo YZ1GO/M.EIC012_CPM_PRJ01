@@ -80,7 +80,7 @@ class AuthViewModel(
                 _uiState.update { current ->
                     current.copy(
                         isLoading = false,
-                        errorMessage = error.message ?: "Could not sign in"
+                        errorMessage = error.localizedMessage ?: error.message ?: error.toString()
                     )
                 }
             }
@@ -117,7 +117,7 @@ class AuthViewModel(
                 _uiState.update { current ->
                     current.copy(
                         isLoading = false,
-                        errorMessage = error.message ?: "Could not sign up"
+                        errorMessage = error.localizedMessage ?: error.message ?: error.toString()
                     )
                 }
             }
@@ -150,7 +150,7 @@ class AuthViewModel(
                     _uiState.update { current ->
                         current.copy(
                             isLoading = false,
-                            errorMessage = error.message ?: "Could not sign in with Google"
+                            errorMessage = error.localizedMessage ?: error.message ?: error.toString()
                         )
                     }
                 }
@@ -160,8 +160,10 @@ class AuthViewModel(
     fun continueAsGuest() {
         _uiState.update { it.copy(isLoading = true, errorMessage = null) }
         viewModelScope.launch {
-            authRepository.getOrCreateAnonymousUser()
+            authRepository.getOrCreateAnonymousUser("Guest")
                 .onSuccess {
+                    // Wait a short moment to ensure session is established
+                    kotlinx.coroutines.delay(250)
                     _uiState.update { current ->
                         current.copy(
                             isLoading = false,
@@ -174,7 +176,7 @@ class AuthViewModel(
                     _uiState.update { current ->
                         current.copy(
                             isLoading = false,
-                            errorMessage = error.message ?: "Could not continue as guest"
+                            errorMessage = error.localizedMessage ?: error.message ?: error.toString()
                         )
                     }
                 }
