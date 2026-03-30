@@ -282,11 +282,18 @@ class GroupRepositoryImpl(
                 val remoteGroupIds = remoteGroups.map { it.id }.toSet()
                 localGroups.forEach { localGroup ->
                     if (localGroup.id !in remoteGroupIds) {
-                        val isMemberRemotely = runCatching {
+                        val isMemberRemotely = try {
                             withTimeoutOrNull(1500L) {
                                 remoteGroupHasMember(localGroup.id, currentUser.id)
                             }
-                        }.getOrNull()
+                        } catch (e: Exception) {
+                            if (e is com.google.firebase.firestore.FirebaseFirestoreException && 
+                                e.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                                false
+                            } else {
+                                null
+                            }
+                        }
 
                         if (isMemberRemotely == false) {
                             pendingSyncStore.removePendingGroupSync(localGroup.id)
@@ -331,11 +338,19 @@ class GroupRepositoryImpl(
 
     private suspend fun reconcileDeletedRemoteGroups(localGroups: List<Group>) {
         localGroups.forEach { localGroup ->
-            val existsRemotely = runCatching {
+            val existsRemotely = try {
                 withTimeoutOrNull(3000L) {
                     remoteGroupExists(localGroup.id)
                 }
-            }.getOrNull()
+            } catch (e: Exception) {
+                // If Firestore denies us access, it means we are kicked out or the group is deleted.
+                if (e is com.google.firebase.firestore.FirebaseFirestoreException && 
+                    e.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                    false 
+                } else {
+                    null // Actual network failure, preserve local data
+                }
+            }
 
             if (existsRemotely == false) {
                 pendingSyncStore.removePendingGroupSync(localGroup.id)
