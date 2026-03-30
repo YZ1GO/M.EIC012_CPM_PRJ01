@@ -462,128 +462,88 @@ class AuthRepositoryImpl(
         candidateGroupIds: Set<String>
     ) {
         val now = System.currentTimeMillis()
-
         if (candidateGroupIds.isEmpty()) return
 
-        val MAX_BATCH_SIZE = 450 // Keep below Firestore 500-operation limit
+        val maxBatchSize = 450
 
-        // Phase 1: Ensure the registered user has member documents for all groups where the
-        // anonymous user was a member. We commit these sets first so the registered user becomes
-        // a member and subsequent operations (deletes/updates) are permitted by security rules.
+        // =========================================================================
+        // PHASE 1: Bootstrapping Membership
+        // Commit the new user to all groups FIRST so they pass the isGroupMember rule.
+        // =========================================================================
         var firstBatch = firestore.batch()
-        var firstOpCount = 0
         candidateGroupIds.forEach { groupId ->
             val groupRef = firestore.collection("groups").document(groupId)
-            val memberSnapshot = groupRef.collection("members").document(oldUserId).get().awaitTaskResult()
-            if (memberSnapshot.exists()) {
-                // Create new member doc for the registered user (allowed when request.auth.uid == newUserId)
-                if (firstOpCount >= MAX_BATCH_SIZE) {
-                    firstBatch.commit().awaitTaskResult()
-                    firstBatch = firestore.batch()
-                    firstOpCount = 0
-                }
-                firstBatch.set(
-                    groupRef.collection("members").document(newUserId),
-                    mapOf(
-                        "userId" to newUserId,
-                        "updatedAt" to now
-                    ),
-                    SetOptions.merge()
+
+            // We use standard .set() without merge so rules treat it strictly as a Create
+            firstBatch.set(
+                groupRef.collection("members").document(newUserId),
+                mapOf(
+                    "userId" to newUserId,
+                    "updatedAt" to now
                 )
-                firstOpCount += 1
-            }
+            )
         }
-        if (firstOpCount > 0) {
-            firstBatch.commit().awaitTaskResult()
-        }
+        firstBatch.commit().awaitTaskResult()
 
-        // Phase 2: Now that the registered user is a member, perform reassignments and remove
-        // the anonymous member documents. These operations require the requester to be a group
-        // member and so will succeed now.
+        // Wait a half-second to guarantee the Firestore Rules Engine has cached Phase 1
+        kotlinx.coroutines.delay(500)
+
+        // =========================================================================
+        // PHASE 2: Cache-Driven Reassignment (Zero Cloud Reads)
+        // We use our local Room DB to figure out what needs to change in the cloud.
+        // =========================================================================
         var secondBatch = firestore.batch()
-        var secondOpCount = 0
+        var opCount = 0
+
         candidateGroupIds.forEach { groupId ->
             val groupRef = firestore.collection("groups").document(groupId)
-            // Only operate on groups where the anonymous user was present
-            val memberSnapshot = groupRef.collection("members").document(oldUserId).get().awaitTaskResult()
-            if (!memberSnapshot.exists()) return@forEach
 
-            // Find all expenses with oldUserId as paidByUserId and reassign payer/split docs
-            val expensesSnapshot = groupRef.collection("expenses").get().awaitTaskResult()
-            expensesSnapshot.documents.forEach { expenseDoc ->
-                val paidByUserId = expenseDoc.getString("paidByUserId")
+            // 1. Reassign Expenses using LOCAL Cache
+            val localExpenses = cache.getExpensesByGroup(groupId)
+            localExpenses.forEach { expense ->
+                val expenseRef = groupRef.collection("expenses").document(expense.id)
 
-                // Reassign payer doc if oldUserId is the payer
-                val payerSnapshot = expenseDoc.reference.collection("payers").document(oldUserId).get().awaitTaskResult()
-                if (payerSnapshot.exists()) {
-                    if (secondOpCount >= MAX_BATCH_SIZE) {
-                        secondBatch.commit().awaitTaskResult()
-                        secondBatch = firestore.batch()
-                        secondOpCount = 0
-                    }
-                    secondBatch.delete(payerSnapshot.reference)
-                    secondBatch.set(
-                        expenseDoc.reference.collection("payers").document(newUserId),
-                        mapOf(
-                            "userId" to newUserId,
-                            "amount" to (payerSnapshot.getDouble("amount") ?: 0.0),
-                            "updatedAt" to now
-                        ),
-                        SetOptions.merge()
-                    )
-                    secondOpCount += 2
+                // Swap paidByUserId if necessary
+                if (expense.paidByUserId == oldUserId) {
+                    if (opCount >= maxBatchSize) { secondBatch.commit().awaitTaskResult(); secondBatch = firestore.batch(); opCount = 0 }
+                    secondBatch.update(expenseRef, mapOf("paidByUserId" to newUserId, "updatedAt" to now))
+                    opCount++
                 }
 
-                // Reassign split doc for oldUserId
-                val splitSnapshot = expenseDoc.reference.collection("splits").document(oldUserId).get().awaitTaskResult()
-                if (splitSnapshot.exists()) {
-                    if (secondOpCount >= MAX_BATCH_SIZE) {
-                        secondBatch.commit().awaitTaskResult()
-                        secondBatch = firestore.batch()
-                        secondOpCount = 0
-                    }
-                    secondBatch.delete(splitSnapshot.reference)
+                // Swap Payers
+                val payers = cache.getExpensePayersForExpense(expense.id)
+                val oldPayer = payers.find { it.userId == oldUserId }
+                if (oldPayer != null) {
+                    if (opCount >= maxBatchSize - 1) { secondBatch.commit().awaitTaskResult(); secondBatch = firestore.batch(); opCount = 0 }
+                    secondBatch.delete(expenseRef.collection("payers").document(oldUserId))
                     secondBatch.set(
-                        expenseDoc.reference.collection("splits").document(newUserId),
-                        mapOf(
-                            "userId" to newUserId,
-                            "amount" to (splitSnapshot.getDouble("amount") ?: 0.0),
-                            "updatedAt" to now
-                        ),
-                        SetOptions.merge()
+                        expenseRef.collection("payers").document(newUserId),
+                        mapOf("userId" to newUserId, "amount" to oldPayer.amount, "updatedAt" to now)
                     )
-                    secondOpCount += 2
+                    opCount += 2
                 }
 
-                // Reassign expense's paidByUserId if it was the oldUserId
-                if (paidByUserId == oldUserId) {
-                    if (secondOpCount >= MAX_BATCH_SIZE) {
-                        secondBatch.commit().awaitTaskResult()
-                        secondBatch = firestore.batch()
-                        secondOpCount = 0
-                    }
-                    secondBatch.update(
-                        expenseDoc.reference,
-                        mapOf("paidByUserId" to newUserId, "updatedAt" to now)
+                // Swap Splits
+                val splits = cache.getExpenseSharesForExpense(expense.id)
+                val oldSplit = splits.find { it.userId == oldUserId }
+                if (oldSplit != null) {
+                    if (opCount >= maxBatchSize - 1) { secondBatch.commit().awaitTaskResult(); secondBatch = firestore.batch(); opCount = 0 }
+                    secondBatch.delete(expenseRef.collection("splits").document(oldUserId))
+                    secondBatch.set(
+                        expenseRef.collection("splits").document(newUserId),
+                        mapOf("userId" to newUserId, "amount" to oldSplit.amount, "updatedAt" to now)
                     )
-                    secondOpCount += 1
+                    opCount += 2
                 }
             }
 
-            // Finally remove the old anonymous member doc
-            val oldMemberSnapshot = groupRef.collection("members").document(oldUserId).get().awaitTaskResult()
-            if (oldMemberSnapshot.exists()) {
-                if (secondOpCount >= MAX_BATCH_SIZE) {
-                    secondBatch.commit().awaitTaskResult()
-                    secondBatch = firestore.batch()
-                    secondOpCount = 0
-                }
-                secondBatch.delete(oldMemberSnapshot.reference)
-                secondOpCount += 1
-            }
+            // 2. Delete the old guest member document
+            if (opCount >= maxBatchSize) { secondBatch.commit().awaitTaskResult(); secondBatch = firestore.batch(); opCount = 0 }
+            secondBatch.delete(groupRef.collection("members").document(oldUserId))
+            opCount++
         }
 
-        if (secondOpCount > 0) {
+        if (opCount > 0) {
             secondBatch.commit().awaitTaskResult()
         }
     }

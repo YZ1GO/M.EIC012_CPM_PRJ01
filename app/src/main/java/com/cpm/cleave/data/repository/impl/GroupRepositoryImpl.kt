@@ -81,30 +81,51 @@ class GroupRepositoryImpl(
 
             refreshedIds.forEach { groupId ->
                 if (!groupDocRegistrations.containsKey(groupId)) {
-                    groupDocRegistrations[groupId] = firestore.collection("groups")
+                    val listener = firestore.collection("groups")
                         .document(groupId)
-                        .addSnapshotListener { _, _ ->
+                        .addSnapshotListener { _, error ->
+                            if (error != null) {
+                                if (error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                                    groupDocRegistrations[groupId]?.remove() // Safely stop the listener
+                                }
+                                return@addSnapshotListener
+                            }
                             scope.launch { refreshAndEmit() }
                         }
+                    groupDocRegistrations[groupId] = listener
                 }
 
                 if (!memberDocRegistrations.containsKey(groupId)) {
-                    memberDocRegistrations[groupId] = firestore.collection("groups")
+                    val listener = firestore.collection("groups")
                         .document(groupId)
                         .collection("members")
                         .document(userId)
-                        .addSnapshotListener { _, _ ->
+                        .addSnapshotListener { _, error ->
+                            if (error != null) {
+                                if (error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                                    memberDocRegistrations[groupId]?.remove() // Safely stop the listener
+                                }
+                                return@addSnapshotListener
+                            }
                             scope.launch { refreshAndEmit() }
                         }
+                    memberDocRegistrations[groupId] = listener
                 }
 
                 if (!membersCollectionRegistrations.containsKey(groupId)) {
-                    membersCollectionRegistrations[groupId] = firestore.collection("groups")
+                    val listener = firestore.collection("groups")
                         .document(groupId)
                         .collection("members")
-                        .addSnapshotListener { _, _ ->
+                        .addSnapshotListener { _, error ->
+                            if (error != null) {
+                                if (error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                                    membersCollectionRegistrations[groupId]?.remove() // Safely stop the listener
+                                }
+                                return@addSnapshotListener
+                            }
                             scope.launch { refreshAndEmit() }
                         }
+                    membersCollectionRegistrations[groupId] = listener
                 }
             }
         }
@@ -114,9 +135,16 @@ class GroupRepositoryImpl(
             refreshAndEmit()
         }
 
-        val membershipRegistration = firestore.collectionGroup("members")
+        var membershipRegistration: ListenerRegistration? = null
+        membershipRegistration = firestore.collectionGroup("members")
             .whereEqualTo("userId", userId)
-            .addSnapshotListener { _, _ ->
+            .addSnapshotListener { _, error ->
+                if (error != null) {
+                    if (error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                        membershipRegistration?.remove()
+                    }
+                    return@addSnapshotListener
+                }
                 scope.launch {
                     refreshAndEmit()
                 }

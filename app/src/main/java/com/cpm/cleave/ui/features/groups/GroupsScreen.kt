@@ -294,7 +294,7 @@ fun GroupDetailsScreen(
             Spacer(modifier = Modifier.height(6.dp))
 
             if (uiState.debtsWithReason.isEmpty()) {
-                Text("No debts yet.", color = Color.White, fontSize = 13.sp)
+                Text("No debts yet.", color = Color.Black, fontSize = 13.sp)
             } else {
                 uiState.debtsWithReason.forEach { debtWithReason ->
                     val debt = debtWithReason.debt
@@ -308,12 +308,12 @@ fun GroupDetailsScreen(
                             text = "$fromName owes $toName: ${"%.2f".format(Locale.getDefault(), debt.amount)}",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Medium,
-                            color = Color.White
+                            color = Color.Black
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = reasonText,
-                            color = Color.White,
+                            color = Color.Black,
                             fontSize = 12.sp,
                             fontStyle = FontStyle.Italic
                         )
@@ -369,13 +369,13 @@ private fun ExpenseDetailsItem(expense: Expense, userDisplayNames: Map<String, S
                     text = desc,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.White
+                    color = Color.Black
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = payerText,
                     fontSize = 12.sp,
-                    color = Color.White
+                    color = Color.Black
                 )
             }
             Spacer(modifier = Modifier.width(12.dp))
@@ -383,11 +383,11 @@ private fun ExpenseDetailsItem(expense: Expense, userDisplayNames: Map<String, S
                 text = expense.amount.toString(),
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color.White
+                color = Color.Black
             )
         }
         Spacer(modifier = Modifier.height(4.dp))
-        Text(text = dateText, color = Color.White, fontSize = 11.sp)
+        Text(text = dateText, color = Color.Black, fontSize = 11.sp)
     }
 }
 
