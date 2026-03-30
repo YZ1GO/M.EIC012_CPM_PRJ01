@@ -326,4 +326,11 @@ class Cache(context: Context) {
             )
         )
     }
+
+    // Completely clears the Room database.
+    suspend fun clearAll() {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            database.clearAllTables()
+        }
+    }
 }

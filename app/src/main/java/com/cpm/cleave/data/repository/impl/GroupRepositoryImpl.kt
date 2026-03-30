@@ -20,16 +20,21 @@ import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 import kotlin.coroutines.resume
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class GroupRepositoryImpl(
     private val cache: Cache,
@@ -42,121 +47,129 @@ class GroupRepositoryImpl(
     private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
 ) : IGroupRepository {
 
-    override fun observeGroups(): Flow<List<Group>> = callbackFlow {
-        val currentUser = authSessionStore.getActiveUser()
-        if (currentUser == null) {
-            trySend(emptyList())
-            close()
-            return@callbackFlow
-        }
+    @OptIn(ExperimentalCoroutinesApi::class)
+    override fun observeGroups(): Flow<List<Group>> = authSessionStore.observeActiveUser()
+        .distinctUntilChanged { old, new -> old?.id == new?.id }
+        .flatMapLatest { user ->
+            if (user == null) return@flatMapLatest kotlinx.coroutines.flow.flowOf(emptyList())
 
-        val userId = currentUser.id
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        val groupDocRegistrations = mutableMapOf<String, ListenerRegistration>()
-        val memberDocRegistrations = mutableMapOf<String, ListenerRegistration>()
-        val membersCollectionRegistrations = mutableMapOf<String, ListenerRegistration>()
+            val userId = user.id // This will now be updated automatically after merge
 
-        suspend fun refreshAndEmit() {
-            val refreshed = getGroups().getOrElse { cache.loadGroups(userId) }
-            trySend(refreshed)
+            callbackFlow {
+                val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-            val refreshedIds = refreshed.map { it.id }.toSet()
+                val refreshMutex = Mutex()
 
-            groupDocRegistrations
-                .filterKeys { it !in refreshedIds }
-                .values
-                .forEach { it.remove() }
-            memberDocRegistrations
-                .filterKeys { it !in refreshedIds }
-                .values
-                .forEach { it.remove() }
-            membersCollectionRegistrations
-                .filterKeys { it !in refreshedIds }
-                .values
-                .forEach { it.remove() }
+                val groupDocRegistrations = mutableMapOf<String, ListenerRegistration>()
+                val memberDocRegistrations = mutableMapOf<String, ListenerRegistration>()
+                val membersCollectionRegistrations = mutableMapOf<String, ListenerRegistration>()
 
-            groupDocRegistrations.keys.removeAll { it !in refreshedIds }
-            memberDocRegistrations.keys.removeAll { it !in refreshedIds }
-            membersCollectionRegistrations.keys.removeAll { it !in refreshedIds }
-
-            refreshedIds.forEach { groupId ->
-                if (!groupDocRegistrations.containsKey(groupId)) {
-                    val listener = firestore.collection("groups")
-                        .document(groupId)
-                        .addSnapshotListener { _, error ->
-                            if (error != null) {
-                                if (error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
-                                    groupDocRegistrations[groupId]?.remove() // Safely stop the listener
-                                }
-                                return@addSnapshotListener
-                            }
-                            scope.launch { refreshAndEmit() }
+                suspend fun refreshAndEmit() {
+                    refreshMutex.withLock {
+                        val result = getGroups()
+                        val groupsToDisplay = result.getOrElse { 
+                            val local = cache.loadGroups(userId)
+                            android.util.Log.d("GroupRepo", "Remote failed, displaying ${local.size} local groups")
+                            local 
                         }
-                    groupDocRegistrations[groupId] = listener
-                }
 
-                if (!memberDocRegistrations.containsKey(groupId)) {
-                    val listener = firestore.collection("groups")
-                        .document(groupId)
-                        .collection("members")
-                        .document(userId)
-                        .addSnapshotListener { _, error ->
-                            if (error != null) {
-                                if (error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
-                                    memberDocRegistrations[groupId]?.remove() // Safely stop the listener
+                        trySend(groupsToDisplay)
+
+                        if (result.isSuccess) {
+                            val refreshedIds = groupsToDisplay.map { it.id }.toSet()
+
+                            val currentGroupIds = groupDocRegistrations.keys.toMutableList()
+                            currentGroupIds.forEach { id ->
+                                if (id !in refreshedIds) {
+                                    groupDocRegistrations.remove(id)?.remove()
+                                    memberDocRegistrations.remove(id)?.remove()
+                                    membersCollectionRegistrations.remove(id)?.remove()
                                 }
-                                return@addSnapshotListener
                             }
-                            scope.launch { refreshAndEmit() }
-                        }
-                    memberDocRegistrations[groupId] = listener
-                }
 
-                if (!membersCollectionRegistrations.containsKey(groupId)) {
-                    val listener = firestore.collection("groups")
-                        .document(groupId)
-                        .collection("members")
-                        .addSnapshotListener { _, error ->
-                            if (error != null) {
-                                if (error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
-                                    membersCollectionRegistrations[groupId]?.remove() // Safely stop the listener
+                            refreshedIds.forEach { groupId ->
+                                if (!groupDocRegistrations.containsKey(groupId)) {
+                                    val listener = firestore.collection("groups")
+                                        .document(groupId)
+                                        .addSnapshotListener { _, error ->
+                                            if (error != null) {
+                                                if (error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                                                    groupDocRegistrations[groupId]?.remove() // Safely stop the listener
+                                                }
+                                                return@addSnapshotListener
+                                            }
+                                            scope.launch { refreshAndEmit() }
+                                        }
+                                    groupDocRegistrations[groupId] = listener
                                 }
-                                return@addSnapshotListener
+
+                                if (!memberDocRegistrations.containsKey(groupId)) {
+                                    val listener = firestore.collection("groups")
+                                        .document(groupId)
+                                        .collection("members")
+                                        .document(userId)
+                                        .addSnapshotListener { _, error ->
+                                            if (error != null) {
+                                                if (error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                                                    memberDocRegistrations[groupId]?.remove() // Safely stop the listener
+                                                }
+                                                return@addSnapshotListener
+                                            }
+                                            scope.launch { refreshAndEmit() }
+                                        }
+                                    memberDocRegistrations[groupId] = listener
+                                }
+
+                                if (!membersCollectionRegistrations.containsKey(groupId)) {
+                                    val listener = firestore.collection("groups")
+                                        .document(groupId)
+                                        .collection("members")
+                                        .addSnapshotListener { _, error ->
+                                            if (error != null) {
+                                                if (error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                                                    membersCollectionRegistrations[groupId]?.remove() // Safely stop the listener
+                                                }
+                                                return@addSnapshotListener
+                                            }
+                                            scope.launch { refreshAndEmit() }
+                                        }
+                                    membersCollectionRegistrations[groupId] = listener
+                                }
                             }
-                            scope.launch { refreshAndEmit() }
                         }
-                    membersCollectionRegistrations[groupId] = listener
-                }
-            }
-        }
-
-        scope.launch {
-            trySend(cache.loadGroups(userId))
-            refreshAndEmit()
-        }
-
-        var membershipRegistration: ListenerRegistration? = null
-        membershipRegistration = firestore.collectionGroup("members")
-            .whereEqualTo("userId", userId)
-            .addSnapshotListener { _, error ->
-                if (error != null) {
-                    if (error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
-                        membershipRegistration?.remove()
                     }
-                    return@addSnapshotListener
                 }
+
+                val initialLocalGroups = cache.loadGroups(userId)
+                trySend(initialLocalGroups)
+
                 scope.launch {
                     refreshAndEmit()
                 }
-            }
 
-        awaitClose {
-            membershipRegistration.remove()
-            groupDocRegistrations.values.forEach { it.remove() }
-            memberDocRegistrations.values.forEach { it.remove() }
-            membersCollectionRegistrations.values.forEach { it.remove() }
-            scope.cancel()
-        }
+                var membershipRegistration: ListenerRegistration? = null
+                membershipRegistration = firestore.collectionGroup("members")
+                    .whereEqualTo("userId", userId)
+                    .addSnapshotListener { _, error ->
+                        if (error != null) {
+                            if (error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                                membershipRegistration?.remove()
+                            }
+                            return@addSnapshotListener
+                        }
+                        scope.launch {
+                            refreshAndEmit()
+                        }
+                    }
+
+                awaitClose {
+                    membershipRegistration?.remove()
+                    groupDocRegistrations.values.forEach { it.remove() }
+                    memberDocRegistrations.values.forEach { it.remove() }
+                    membersCollectionRegistrations.values.forEach { it.remove() }
+                    scope.cancel()
+                }
+            }
     }
 
     override suspend fun createGroup(name: String, currency: String): Result<Group> {

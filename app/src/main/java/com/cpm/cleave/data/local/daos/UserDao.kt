@@ -7,6 +7,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import com.cpm.cleave.data.local.entities.UserEntity
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface UserDao {
@@ -30,4 +31,7 @@ interface UserDao {
 
     @Query("SELECT * FROM users WHERE isAnonymous = 1 AND isDeleted = 0 LIMIT 1")
     suspend fun getActiveAnonymousUser(): UserEntity?
+
+    @Query("SELECT * FROM users WHERE isDeleted = 0 AND lastSeen = (SELECT MAX(lastSeen) FROM users WHERE isDeleted = 0) LIMIT 1")
+    fun observeActiveUser(): Flow<UserEntity?>
 }

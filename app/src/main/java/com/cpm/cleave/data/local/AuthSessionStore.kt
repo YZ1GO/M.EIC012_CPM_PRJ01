@@ -6,6 +6,8 @@ import com.cpm.cleave.data.local.entities.UserEntity
 import com.cpm.cleave.data.local.entities.GroupMemberEntity
 import com.cpm.cleave.model.User
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
 class AuthSessionStore(context: Context) {
@@ -302,5 +304,9 @@ class AuthSessionStore(context: Context) {
             lastSeen = lastSeen,
             groups = userGroups
         )
+    }
+
+    fun observeActiveUser(): Flow<User?> {
+        return userDao.observeActiveUser().map { it?.toDomain() }
     }
 }

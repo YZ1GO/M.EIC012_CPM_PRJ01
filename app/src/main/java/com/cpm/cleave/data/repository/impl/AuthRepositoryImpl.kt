@@ -63,7 +63,8 @@ class AuthRepositoryImpl(
             if (userId.isBlank()) return Result.success(null)
 
             val local = authSessionStore.getUserById(userId)
-            if (local != null && local.name.isNotBlank() && local.name != userId) {
+            
+            if (local != null && !local.isDeleted && local.name.isNotBlank() && local.name != userId) {
                 return Result.success(local.name)
             }
 
@@ -123,201 +124,99 @@ class AuthRepositoryImpl(
                 .awaitTaskResult()
 
             Result.success(anonymousUser)
-
-            Result.success(anonymousUser)
         } catch (e: Exception) {
             android.util.Log.e("AuthRepo", "Error in getOrCreateAnonymousUser: ", e)
             Result.failure(e)
         }
     }
 
-    override suspend fun signUpWithEmail(
-        name: String,
-        email: String,
-        password: String,
-        mergeAnonymousData: Boolean
+override suspend fun signUpWithEmail(
+        name: String, email: String, password: String, mergeAnonymousData: Boolean
     ): Result<User> {
         return try {
-            require(name.isNotBlank()) { "Name is required." }
-            require(email.isNotBlank()) { "Email is required." }
-            require(password.length >= 6) { "Password must be at least 6 characters." }
+            // 1. Capture old state
+            val oldState = captureAnonymousState()
 
-            // Capture old anonymous user ID before authentication.
-            val oldAnonymousUser = authSessionStore.getActiveUser()
-            val oldAnonymousGroupIds = if (oldAnonymousUser != null && oldAnonymousUser.isAnonymous) {
-                cache.loadGroups(oldAnonymousUser.id).map { it.id }.toSet()
-            } else {
-                emptySet()
-            }
+            val authResult = firebaseAuth.createUserWithEmailAndPassword(email.trim(), password).awaitTaskResult()
+            val user = authResult.user ?: return Result.failure(IllegalStateException("No user"))
 
-            if (!mergeAnonymousData && oldAnonymousUser != null && oldAnonymousUser.isAnonymous) {
-                val requiresMerge = hasAnonymousFinancialFootprint(oldAnonymousUser.id)
-                if (requiresMerge) {
-                    return Result.failure(
-                        IllegalStateException("You have guest expense data that affects balances. Enable merge to continue.")
-                    )
-                }
-            }
-
-            // If user chose not to merge guest data, remove anonymous memberships now while still
-            // authenticated as the anonymous user so Firestore security rules allow the deletions.
-            if (!mergeAnonymousData && oldAnonymousUser != null && oldAnonymousUser.isAnonymous) {
-                removeAnonymousUserFromAllGroupsInFirestore(oldAnonymousUser.id, oldAnonymousGroupIds)
-            }
-
-            val authResult = firebaseAuth
-                .createUserWithEmailAndPassword(email.trim(), password)
-                .awaitTaskResult()
-
-            val user = authResult.user ?: return Result.failure(IllegalStateException("Could not create account."))
-
-            user.updateProfile(
-                UserProfileChangeRequest.Builder()
-                    .setDisplayName(name.trim())
-                    .build()
-            ).awaitTaskResult()
-
-            ensureUserDocument(
-                uid = user.uid,
-                name = name.trim(),
-                email = user.email,
-                isAnonymous = false
-            )
+            user.updateProfile(UserProfileChangeRequest.Builder().setDisplayName(name.trim()).build()).awaitTaskResult()
+            ensureUserDocument(user.uid, name.trim(), user.email, false)
 
             val mergedUser = authSessionStore.activateRegisteredUserAfterAuthentication(
-                registeredUserId = user.uid,
-                registeredName = user.displayName ?: name.trim(),
-                registeredEmail = user.email,
-                mergeAnonymousData = mergeAnonymousData
+                user.uid, user.displayName ?: name.trim(), user.email, mergeAnonymousData
             )
 
-            if (mergeAnonymousData && oldAnonymousUser != null && oldAnonymousUser.isAnonymous && oldAnonymousUser.id != user.uid) {
-                reassignAnonymousToRegisteredUserInFirestore(oldAnonymousUser.id, user.uid, oldAnonymousGroupIds)
-            }
+            // 2. Perform Migration & Invalidate
+            handleDataMigration(oldState, user.uid, mergeAnonymousData)
 
             Result.success(mergedUser)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        } catch (e: Exception) { Result.failure(e) }
     }
 
     override suspend fun signInWithEmail(
-        email: String,
-        password: String,
-        mergeAnonymousData: Boolean
+        email: String, password: String, mergeAnonymousData: Boolean
     ): Result<User> {
         return try {
-            require(email.isNotBlank()) { "Email is required." }
-            require(password.isNotBlank()) { "Password is required." }
+            val oldState = captureAnonymousState()
 
-            // Capture old anonymous user ID before authentication
-            val oldAnonymousUser = authSessionStore.getActiveUser()
-            val oldAnonymousGroupIds = if (oldAnonymousUser != null && oldAnonymousUser.isAnonymous) {
-                cache.loadGroups(oldAnonymousUser.id).map { it.id }.toSet()
-            } else {
-                emptySet()
-            }
+            val authResult = firebaseAuth.signInWithEmailAndPassword(email.trim(), password).awaitTaskResult()
+            val user = authResult.user ?: return Result.failure(IllegalStateException("No user"))
 
-            if (!mergeAnonymousData && oldAnonymousUser != null && oldAnonymousUser.isAnonymous) {
-                val requiresMerge = hasAnonymousFinancialFootprint(oldAnonymousUser.id)
-                if (requiresMerge) {
-                    return Result.failure(
-                        IllegalStateException("You have guest expense data that affects balances. Enable merge to continue.")
-                    )
-                }
-            }
-
-            // If user chose not to merge guest data, remove anonymous memberships now while still
-            // authenticated as the anonymous user so Firestore security rules allow the deletions.
-            if (!mergeAnonymousData && oldAnonymousUser != null && oldAnonymousUser.isAnonymous) {
-                removeAnonymousUserFromAllGroupsInFirestore(oldAnonymousUser.id, oldAnonymousGroupIds)
-            }
-
-            val authResult = firebaseAuth
-                .signInWithEmailAndPassword(email.trim(), password)
-                .awaitTaskResult()
-
-            val user = authResult.user ?: return Result.failure(IllegalStateException("Could not sign in."))
-
-            ensureUserDocument(
-                uid = user.uid,
-                name = user.displayName ?: user.email?.substringBefore("@") ?: "User",
-                email = user.email,
-                isAnonymous = false
-            )
+            ensureUserDocument(user.uid, user.displayName ?: "User", user.email, false)
 
             val mergedUser = authSessionStore.activateRegisteredUserAfterAuthentication(
-                registeredUserId = user.uid,
-                registeredName = user.displayName ?: user.email?.substringBefore("@") ?: "User",
-                registeredEmail = user.email,
-                mergeAnonymousData = mergeAnonymousData
+                user.uid, user.displayName ?: "User", user.email, mergeAnonymousData
             )
 
-            if (mergeAnonymousData && oldAnonymousUser != null && oldAnonymousUser.isAnonymous && oldAnonymousUser.id != user.uid) {
-                reassignAnonymousToRegisteredUserInFirestore(oldAnonymousUser.id, user.uid, oldAnonymousGroupIds)
-            }
+            handleDataMigration(oldState, user.uid, mergeAnonymousData)
 
             Result.success(mergedUser)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        } catch (e: Exception) { Result.failure(e) }
     }
 
     override suspend fun signInWithGoogleIdToken(
-        idToken: String,
-        mergeAnonymousData: Boolean
+        idToken: String, mergeAnonymousData: Boolean
     ): Result<User> {
         return try {
-            require(idToken.isNotBlank()) { "Invalid Google token." }
-
-            // Capture old anonymous user ID before authentication
-            val oldAnonymousUser = authSessionStore.getActiveUser()
-            val oldAnonymousGroupIds = if (oldAnonymousUser != null && oldAnonymousUser.isAnonymous) {
-                cache.loadGroups(oldAnonymousUser.id).map { it.id }.toSet()
-            } else {
-                emptySet()
-            }
-
-            if (!mergeAnonymousData && oldAnonymousUser != null && oldAnonymousUser.isAnonymous) {
-                val requiresMerge = hasAnonymousFinancialFootprint(oldAnonymousUser.id)
-                if (requiresMerge) {
-                    return Result.failure(
-                        IllegalStateException("You have guest expense data that affects balances. Enable merge to continue.")
-                    )
-                }
-            }
-
-            // If user chose not to merge guest data, remove anonymous memberships now while still
-            // authenticated as the anonymous user so Firestore security rules allow the deletions.
-            if (!mergeAnonymousData && oldAnonymousUser != null && oldAnonymousUser.isAnonymous) {
-                removeAnonymousUserFromAllGroupsInFirestore(oldAnonymousUser.id, oldAnonymousGroupIds)
-            }
+            val oldState = captureAnonymousState()
 
             val credential = GoogleAuthProvider.getCredential(idToken, null)
             val authResult = firebaseAuth.signInWithCredential(credential).awaitTaskResult()
-            val user = authResult.user ?: return Result.failure(IllegalStateException("Could not sign in with Google."))
+            val user = authResult.user ?: return Result.failure(IllegalStateException("No user"))
 
-            ensureUserDocument(
-                uid = user.uid,
-                name = user.displayName ?: user.email?.substringBefore("@") ?: "User",
-                email = user.email,
-                isAnonymous = false
-            )
+            ensureUserDocument(user.uid, user.displayName ?: "User", user.email, false)
 
             val mergedUser = authSessionStore.activateRegisteredUserAfterAuthentication(
-                registeredUserId = user.uid,
-                registeredName = user.displayName ?: user.email?.substringBefore("@") ?: "User",
-                registeredEmail = user.email,
-                mergeAnonymousData = mergeAnonymousData
+                user.uid, user.displayName ?: "User", user.email, mergeAnonymousData
             )
 
-            if (mergeAnonymousData && oldAnonymousUser != null && oldAnonymousUser.isAnonymous && oldAnonymousUser.id != user.uid) {
-                reassignAnonymousToRegisteredUserInFirestore(oldAnonymousUser.id, user.uid, oldAnonymousGroupIds)
-            }
+            handleDataMigration(oldState, user.uid, mergeAnonymousData)
 
             Result.success(mergedUser)
-        } catch (e: Exception) {
-            Result.failure(e)
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    private data class AnonymousState(val id: String?, val groupIds: Set<String>)
+
+    private suspend fun captureAnonymousState(): AnonymousState {
+        val oldUser = authSessionStore.getActiveUser()
+        val groupIds = if (oldUser?.isAnonymous == true) {
+            cache.loadGroups(oldUser.id).map { it.id }.toSet()
+        } else emptySet()
+        return AnonymousState(oldUser?.id, groupIds)
+    }
+
+    private suspend fun handleDataMigration(
+        oldState: AnonymousState, 
+        newUid: String, 
+        shouldMerge: Boolean
+    ) {
+        if (shouldMerge && oldState.id != null && oldState.id != newUid) {
+            // Migrate cloud data
+            reassignAnonymousToRegisteredUserInFirestore(oldState.id, newUid, oldState.groupIds)
+            
+            kotlinx.coroutines.delay(1000)
         }
     }
 
@@ -325,6 +224,7 @@ class AuthRepositoryImpl(
         return try {
             firebaseAuth.signOut()
             authSessionStore.clearAllActiveSessionUsers()
+            cache.clearAll()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

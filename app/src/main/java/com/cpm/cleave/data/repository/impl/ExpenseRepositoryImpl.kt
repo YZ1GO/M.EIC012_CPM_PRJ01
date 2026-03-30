@@ -18,19 +18,24 @@ import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 import kotlin.coroutines.resume
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class ExpenseRepositoryImpl(
     private val cache: Cache,
     private val authSessionStore: AuthSessionStore,
@@ -43,65 +48,87 @@ class ExpenseRepositoryImpl(
 
     private val localExpenseRefreshEvents = MutableSharedFlow<String>(extraBufferCapacity = 64)
 
-    override fun observeExpensesByGroup(groupId: String): Flow<List<Expense>> = callbackFlow {
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        val splitRegistrations = mutableMapOf<String, ListenerRegistration>()
+    override fun observeExpensesByGroup(groupId: String): Flow<List<Expense>> {
+        // Restart the entire flow logic whenever the active user changes
+        return authSessionStore.observeActiveUser()
+        .distinctUntilChanged { old, new -> old?.id == new?.id }
+        .flatMapLatest { user ->
+            // If no user, emit empty
+            if (user == null) return@flatMapLatest kotlinx.coroutines.flow.flowOf(emptyList())
 
-        suspend fun refreshAndEmit() {
-            val refreshedExpenses = getExpensesByGroup(groupId)
-                .getOrElse { cache.getExpensesByGroup(groupId) }
-                .sortedByDescending { it.date }
+            callbackFlow {
+                val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+                val refreshMutex = Mutex()
+                val splitRegistrations = mutableMapOf<String, ListenerRegistration>()
 
-            trySend(refreshedExpenses)
+                suspend fun refreshAndEmit() {
+                    refreshMutex.withLock {
+                        // Falls back to local cache if getExpensesByGroup hits a permission race condition
+                        val refreshedExpenses = getExpensesByGroup(groupId)
+                            .getOrElse { cache.getExpensesByGroup(groupId) }
+                            .sortedByDescending { it.date }
 
-            val expenseIds = refreshedExpenses.map { it.id }.toSet()
-            splitRegistrations
-                .filterKeys { it !in expenseIds }
-                .values
-                .forEach { it.remove() }
-            splitRegistrations.keys.removeAll { it !in expenseIds }
+                        trySend(refreshedExpenses)
 
-            expenseIds.forEach { expenseId ->
-                if (!splitRegistrations.containsKey(expenseId)) {
-                    splitRegistrations[expenseId] = firestore.collection("groups")
-                        .document(groupId)
-                        .collection("expenses")
-                        .document(expenseId)
-                        .collection("splits")
-                        .addSnapshotListener { _, _ ->
-                            scope.launch { refreshAndEmit() }
+                        val expenseIds = refreshedExpenses.map { it.id }.toSet()
+
+                        splitRegistrations.keys.toMutableList().forEach { id ->
+                            if (id !in expenseIds) {
+                                splitRegistrations.remove(id)?.remove()
+                            }
                         }
+
+                        expenseIds.forEach { expenseId ->
+                            if (!splitRegistrations.containsKey(expenseId)) {
+                                splitRegistrations[expenseId] = firestore.collection("groups")
+                                    .document(groupId)
+                                    .collection("expenses")
+                                    .document(expenseId)
+                                    .collection("splits")
+                                    .addSnapshotListener { _, error ->
+                                        // SAFETY CHECK: Ignore permission errors during auth swap
+                                        if (error != null && error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                                            return@addSnapshotListener
+                                        }
+                                        scope.launch { refreshAndEmit() }
+                                    }
+                            }
+                        }
+                    }
                 }
-            }
-        }
 
-        scope.launch {
-            trySend(cache.getExpensesByGroup(groupId).sortedByDescending { it.date })
-            refreshAndEmit()
-        }
-
-        val expensesRegistration = firestore.collection("groups")
-            .document(groupId)
-            .collection("expenses")
-            .addSnapshotListener { _, _ ->
+                // Initial emission
                 scope.launch {
+                    trySend(cache.getExpensesByGroup(groupId).sortedByDescending { it.date })
                     refreshAndEmit()
                 }
-            }
 
-        val localRefreshJob = scope.launch {
-            localExpenseRefreshEvents.collect { changedGroupId ->
-                if (changedGroupId == groupId) {
-                    refreshAndEmit()
+                // Main expenses collection listener
+                val expensesRegistration = firestore.collection("groups")
+                    .document(groupId)
+                    .collection("expenses")
+                    .addSnapshotListener { _, error ->
+                        // SAFETY CHECK: Ignore permission errors during auth swap
+                        if (error != null && error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                            return@addSnapshotListener
+                        }
+                        scope.launch { refreshAndEmit() }
+                    }
+
+                // Internal refresh trigger (e.g. after local creation)
+                val localRefreshJob = scope.launch {
+                    localExpenseRefreshEvents.collect { changedGroupId ->
+                        if (changedGroupId == groupId) refreshAndEmit()
+                    }
+                }
+
+                awaitClose {
+                    expensesRegistration.remove()
+                    localRefreshJob.cancel()
+                    splitRegistrations.values.forEach { it.remove() }
+                    scope.cancel()
                 }
             }
-        }
-
-        awaitClose {
-            expensesRegistration.remove()
-            localRefreshJob.cancel()
-            splitRegistrations.values.forEach { it.remove() }
-            scope.cancel()
         }
     }
 
@@ -127,9 +154,10 @@ class ExpenseRepositoryImpl(
                 )
                 cache.getExpensesByGroup(groupId)
             }
-
+            
             Result.success(
-                remoteResult.getOrElse {
+                remoteResult.getOrElse { error ->
+                    android.util.Log.w("ExpenseRepo", "Remote fetch blocked: ${error.message}")
                     localExpenses
                 }
             )
@@ -423,5 +451,9 @@ class ExpenseRepositoryImpl(
                 }
             }
         }
+    }
+
+    fun forceRefresh(groupId: String) {
+        localExpenseRefreshEvents.tryEmit(groupId)
     }
 }
