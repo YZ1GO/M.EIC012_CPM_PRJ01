@@ -184,6 +184,54 @@ class AuthSessionStore(context: Context) {
         }
     }
 
+    suspend fun activateAnonymousUserSession(
+        anonymousUserId: String,
+        anonymousName: String = "Guest"
+    ): User {
+        return database.withTransaction {
+            val now = System.currentTimeMillis()
+
+            val existingAnonymous = userDao.getUserById(anonymousUserId)
+            if (existingAnonymous == null) {
+                userDao.insertUser(
+                    UserEntity(
+                        id = anonymousUserId,
+                        name = anonymousName,
+                        email = null,
+                        isAnonymous = true,
+                        isDeleted = false,
+                        lastSeen = now
+                    )
+                )
+            } else {
+                userDao.updateUser(
+                    existingAnonymous.copy(
+                        name = existingAnonymous.name.ifBlank { anonymousName },
+                        email = null,
+                        isAnonymous = true,
+                        isDeleted = false,
+                        lastSeen = now
+                    )
+                )
+            }
+
+            userDao.getAllUsers()
+                .filter { !it.isDeleted && it.id != anonymousUserId }
+                .forEach { staleActive ->
+                    userDao.updateUser(
+                        staleActive.copy(
+                            isDeleted = true,
+                            lastSeen = now
+                        )
+                    )
+                }
+
+            val activeAnonymous = userDao.getUserById(anonymousUserId)
+                ?: throw IllegalStateException("Could not activate anonymous user locally.")
+            activeAnonymous.toDomain()
+        }
+    }
+
     // TODO: delete
     suspend fun switchToNewDebugAnonymousUser(baseName: String = "Guest"): User {
         val now = System.currentTimeMillis()

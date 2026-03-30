@@ -1,0 +1,145 @@
+rules_version = '2';
+service cloud.firestore {
+    match /databases/{database}/documents {
+        // helper: user must be authenticated
+        function signedIn() {
+            return request.auth != null;
+        }
+
+        // helper: checks whether the auth provider is anonymous
+        function isAnonymousAuth() {
+            return signedIn() && request.auth.token.firebase.sign_in_provider == 'anonymous';
+        }
+
+        // helper: user exists in the group's members subcollection
+        function isGroupMember(groupId) {
+            return signedIn() &&
+                exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid));
+        }
+
+        // validate top-level group document structure and lengths
+        function validGroupPayload() {
+            return request.resource.data.keys().hasOnly(['name', 'currency', 'joinCode', 'updatedAt']) &&
+                request.resource.data.name is string &&
+                request.resource.data.currency is string &&
+                request.resource.data.joinCode is string &&
+                request.resource.data.updatedAt is int &&
+                request.resource.data.name.size() > 0 &&
+                request.resource.data.name.size() <= 100 &&
+                request.resource.data.currency.size() > 0 &&
+                request.resource.data.currency.size() <= 20 &&
+                request.resource.data.joinCode.size() >= 6 &&
+                request.resource.data.joinCode.size() <= 12;
+        }
+
+        // validate member document payload (simple userId+timestamp)
+        function validMemberPayload(userId) {
+            return request.resource.data.keys().hasOnly(['userId', 'updatedAt']) &&
+                request.resource.data.userId is string &&
+                request.resource.data.updatedAt is int &&
+                request.resource.data.userId == userId;
+        }
+
+        // validate expense payload and apply a smaller cap for anonymous users
+        function validExpensePayload() {
+            return request.resource.data.keys().hasOnly([
+                    'amount',
+                    'description',
+                    'date',
+                    'groupId',
+                    'paidByUserId',
+                    'imagePath',
+                    'updatedAt'
+                ]) &&
+                request.resource.data.amount is number &&
+                request.resource.data.amount > 0 &&
+                request.resource.data.date is int &&
+                request.resource.data.groupId is string &&
+                request.resource.data.paidByUserId is string &&
+                request.resource.data.updatedAt is int &&
+                request.resource.data.description is string &&
+                request.resource.data.description.size() <= 200 &&
+                (!isAnonymousAuth() || request.resource.data.amount <= 200);
+        }
+
+        // validate user document fields and ownership
+        function validUserPayload(userId) {
+            return request.resource.data.keys().hasOnly(['name', 'email', 'isAnonymous', 'lastSeen']) &&
+                request.resource.data.name is string &&
+                request.resource.data.lastSeen is int &&
+                request.resource.data.isAnonymous is bool &&
+                request.resource.data.name.size() > 0 &&
+                request.resource.data.name.size() <= 100 &&
+                (!('email' in request.resource.data) || request.resource.data.email == null || request.resource.data.email is string) &&
+                request.auth.uid == userId;
+        }
+
+        match /users/{userId} {
+            // users may read and write only their own document
+            allow read: if signedIn() && request.auth.uid == userId;
+            allow create, update: if signedIn() && request.auth.uid == userId && validUserPayload(userId);
+            allow delete: if false;
+        }
+
+        match /group_join_codes/{joinCode} {
+            // join-code mapping readable by signed-in users
+            allow read: if signedIn();
+            allow create, update: if signedIn() &&
+                request.resource.data.keys().hasOnly(['groupId', 'joinCode', 'updatedAt']) &&
+                request.resource.data.groupId is string &&
+                request.resource.data.joinCode is string &&
+                request.resource.data.updatedAt is int &&
+                request.resource.data.joinCode == joinCode;
+            allow delete: if false;
+        }
+
+        match /groups/{groupId} {
+            // group access restricted to members
+            allow read: if signedIn() && isGroupMember(groupId);
+            allow create: if signedIn() && validGroupPayload();
+            allow update: if signedIn() && isGroupMember(groupId) && validGroupPayload();
+            allow delete: if false;
+
+            match /members/{userId} {
+                // creator can bootstrap their own member doc; later changes require membership
+                allow read: if signedIn() && isGroupMember(groupId);
+                allow create: if signedIn() && request.auth.uid == userId && validMemberPayload(userId);
+                allow update: if signedIn() && isGroupMember(groupId) && validMemberPayload(userId);
+                allow delete: if signedIn() && isGroupMember(groupId);
+            }
+
+            match /expenses/{expenseId} {
+                // expenses visible to group members; payload validated
+                allow read: if signedIn() && isGroupMember(groupId);
+                allow create, update: if signedIn() && isGroupMember(groupId) && validExpensePayload();
+                allow delete: if signedIn() && isGroupMember(groupId);
+
+                match /payers/{userId} {
+                    // payer entries must match owner and positive amount
+                    allow read: if signedIn() && isGroupMember(groupId);
+                    allow create, update: if signedIn() && isGroupMember(groupId) &&
+                        request.resource.data.keys().hasOnly(['userId', 'amount', 'updatedAt']) &&
+                        request.resource.data.userId is string &&
+                        request.resource.data.userId == userId &&
+                        request.resource.data.amount is number &&
+                        request.resource.data.amount > 0 &&
+                        request.resource.data.updatedAt is int;
+                    allow delete: if signedIn() && isGroupMember(groupId);
+                }
+
+                match /splits/{userId} {
+                    // split entries validated similarly to payers
+                    allow read: if signedIn() && isGroupMember(groupId);
+                    allow create, update: if signedIn() && isGroupMember(groupId) &&
+                        request.resource.data.keys().hasOnly(['userId', 'amount', 'updatedAt']) &&
+                        request.resource.data.userId is string &&
+                        request.resource.data.userId == userId &&
+                        request.resource.data.amount is number &&
+                        request.resource.data.amount > 0 &&
+                        request.resource.data.updatedAt is int;
+                    allow delete: if signedIn() && isGroupMember(groupId);
+                }
+            }
+        }
+    }
+}

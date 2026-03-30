@@ -21,8 +21,7 @@ class ProfileViewModel(
     private val _uiState = MutableStateFlow(
         ProfileUiState(
             isLoading = true,
-            maxGroups = limits.maxGroups,
-            maxTotalDebt = limits.maxTotalDebt
+            maxGroups = limits.maxGroups
         )
     )
     val uiState: StateFlow<ProfileUiState> = _uiState.asStateFlow()

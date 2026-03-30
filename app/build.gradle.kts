@@ -67,6 +67,8 @@ dependencies {
     implementation("com.google.firebase:firebase-analytics")
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.firebase:firebase-appcheck-playintegrity")
+    debugImplementation("com.google.firebase:firebase-appcheck-debug")
 
     implementation("androidx.work:work-runtime-ktx:2.11.1")
 

@@ -7,6 +7,5 @@ data class ProfileUiState(
     val currentUser: User? = null,
     val errorMessage: String? = null,
     val maxGroups: Int = 0,
-    val maxTotalDebt: Double = 0.0,
     val isBusy: Boolean = false
 )

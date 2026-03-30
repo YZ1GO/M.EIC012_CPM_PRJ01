@@ -136,7 +136,7 @@ fun ProfileScreen(
             Spacer(modifier = Modifier.height(8.dp))
             Text("Anonymous limits", fontWeight = FontWeight.Medium)
             Text("- Max groups: ${uiState.maxGroups}")
-            Text("- Max total debt: ${uiState.maxTotalDebt}")
+            
 
             // TODO: delete
             if (isDebuggable) {
