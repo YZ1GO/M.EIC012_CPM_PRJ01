@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.cpm.cleave.dependencyinjection.AppContainer
+import com.cpm.cleave.CleaveApplication
 
 class PendingSyncWorker(
     appContext: Context,
@@ -11,7 +12,7 @@ class PendingSyncWorker(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        val appContainer = AppContainer(applicationContext)
+        val appContainer = (applicationContext as CleaveApplication).appContainer
 
         if (appContainer.authRepository.getCurrentUser().getOrNull() == null) {
             return Result.success()

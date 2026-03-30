@@ -4,12 +4,18 @@ import android.app.Application
 import android.content.pm.ApplicationInfo
 import com.cpm.cleave.data.sync.ConnectivitySyncTrigger
 import com.cpm.cleave.data.sync.SyncWorkScheduler
+import com.cpm.cleave.dependencyinjection.AppContainer
 import com.google.firebase.appcheck.FirebaseAppCheck
 import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
 
 class CleaveApplication : Application() {
+
+    lateinit var appContainer: AppContainer
+        private set
+
     override fun onCreate() {
         super.onCreate()
+        appContainer = AppContainer(this)
         initializeFirebaseAppCheck()
         SyncWorkScheduler.schedule(this)
         ConnectivitySyncTrigger.register(this)
