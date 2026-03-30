@@ -392,24 +392,20 @@ class GroupRepositoryImpl(
             }
 
             val normalizedJoinCode = joinCode.trim().uppercase(Locale.ROOT)
-            val currentUser = authSessionStore.getActiveUser()
-            val resolvedGroup = withTimeoutOrNull(3000L) {
-                fetchGroupByJoinCodeFromRemote(normalizedJoinCode)
-            }
+            val currentUser = authSessionStore.getActiveUser() 
+                ?: return Result.failure(IllegalStateException("No current user found."))
 
-            if (resolvedGroup != null) {
-                cache.upsertGroupWithMembers(resolvedGroup)
-            }
-
-            joinGroupUseCase.execute(group = resolvedGroup, currentUser = currentUser)
-                .getOrElse { return Result.failure(it) }
-
-            val joinedGroup = resolvedGroup ?: return Result.failure(IllegalArgumentException("Invalid group code."))
-            val resolvedUser = currentUser ?: return Result.failure(IllegalStateException("No current user found."))
+            val mappedGroupId = runCatching {
+                firestore.collection("group_join_codes")
+                    .document(normalizedJoinCode)
+                    .get()
+                    .awaitTaskResult()
+                    .getString("groupId")
+            }.getOrNull() ?: return Result.failure(IllegalArgumentException("Invalid group code."))
 
             val remoteJoinSucceeded = runCatching {
                 withTimeoutOrNull(6000L) {
-                    syncGroupMembershipToRemote(groupId = joinedGroup.id, userId = resolvedUser.id)
+                    syncGroupMembershipToRemote(groupId = mappedGroupId, userId = currentUser.id)
                     true
                 } ?: false
             }.getOrDefault(false)
@@ -420,21 +416,26 @@ class GroupRepositoryImpl(
                 )
             }
 
+            // Wait 500ms for the Firestore Rules engine to "realize" you are now a member.
+            kotlinx.coroutines.delay(500)
+
+            // Since you are now a member, this call to fetchSingleGroupFromRemote will succeed.
             val refreshedRemoteGroup = withTimeoutOrNull(3000L) {
-                fetchSingleGroupFromRemote(joinedGroup.id)
-            }
+                fetchSingleGroupFromRemote(mappedGroupId)
+            } ?: throw IllegalStateException("Joined group, but could not fetch details. Try opening the group manually.")
 
-            val mergedGroup = refreshedRemoteGroup?.copy(
-                members = (refreshedRemoteGroup.members + resolvedUser.id).distinct()
-            ) ?: joinedGroup.copy(
-                members = (joinedGroup.members + resolvedUser.id).distinct()
-            )
+            cache.upsertGroupWithMembers(refreshedRemoteGroup)
+            pendingSyncStore.removePendingGroupSync(refreshedRemoteGroup.id)
+            
+            warmExpensesCache(listOf(refreshedRemoteGroup.id))
 
-            cache.upsertGroupWithMembers(mergedGroup)
-            pendingSyncStore.removePendingGroupSync(mergedGroup.id)
-
-            Result.success(cache.getGroupById(mergedGroup.id) ?: mergedGroup)
+            Result.success(cache.getGroupById(refreshedRemoteGroup.id) ?: refreshedRemoteGroup)
         } catch (e: Exception) {
+            // Gracefully handle the rule propagation delay
+            if (e is com.google.firebase.firestore.FirebaseFirestoreException && 
+                e.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                return Result.failure(IllegalStateException("Joining... please wait a moment for permissions to update."))
+            }
             Result.failure(e)
         }
     }
