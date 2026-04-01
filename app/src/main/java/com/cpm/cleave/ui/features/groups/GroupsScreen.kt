@@ -1,6 +1,9 @@
 package com.cpm.cleave.ui.features.groups
 
 import android.content.ClipData
+import android.content.Intent
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
@@ -26,22 +29,29 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -58,6 +68,8 @@ import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 
 @Composable
 fun GroupsScreen(groupsViewModel: GroupsViewModel, onGroupClick: (String) -> Unit) {
@@ -181,7 +193,9 @@ fun GroupDetailsScreen(
     val titleBottomSpacing = 18.dp
     val sectionSpacing = 16.dp
     val clipboard = LocalClipboard.current
+    val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    var showQrDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { viewModel.refreshGroupData() }
 
@@ -222,6 +236,7 @@ fun GroupDetailsScreen(
             HeaderChip(label = currentGroup.currency)
             HeaderChip(
                 label = "Code ${currentGroup.joinCode}",
+                textColor = Color.Black,
                 onClick = {
                     coroutineScope.launch {
                         clipboard.setClipEntry(
@@ -230,8 +245,36 @@ fun GroupDetailsScreen(
                     }
                 }
             )
+            HeaderChip(
+                label = "Show QR",
+                onClick = { showQrDialog = true }
+            )
+            HeaderChip(
+                label = "Share",
+                onClick = {
+                    val inviteText = buildString {
+                        appendLine("Join my Cleave group: ${currentGroup.name}")
+                        appendLine("Join code: ${currentGroup.joinCode}")
+                        append("Link: https://cpmcleave.netlify.app/join?joinCode=${currentGroup.joinCode}")
+                    }
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_SUBJECT, "Join ${currentGroup.name} on Cleave")
+                        putExtra(Intent.EXTRA_TEXT, inviteText)
+                    }
+                    context.startActivity(Intent.createChooser(shareIntent, "Share group invite"))
+                }
+            )
         }
         Spacer(modifier = Modifier.height(titleBottomSpacing))
+
+        if (showQrDialog) {
+            GroupQrDialog(
+                groupName = currentGroup.name,
+                joinCode = currentGroup.joinCode,
+                onDismiss = { showQrDialog = false }
+            )
+        }
 
         uiState.errorMessage?.let { Text(it, color = Color.Red) }
 
@@ -340,6 +383,60 @@ fun GroupDetailsScreen(
 }
 
 @Composable
+private fun GroupQrDialog(
+    groupName: String,
+    joinCode: String,
+    onDismiss: () -> Unit
+) {
+    val qrPayload = "https://cpmcleave.netlify.app/join?joinCode=$joinCode"
+    val qrBitmap = remember(qrPayload) { generateQrBitmap(qrPayload, size = 900) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+        title = { Text("$groupName QR") },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (qrBitmap != null) {
+                    Image(
+                        bitmap = qrBitmap.asImageBitmap(),
+                        contentDescription = "Group QR code",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(260.dp)
+                    )
+                } else {
+                    Text("Could not generate QR code")
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Join code: $joinCode",
+                    fontWeight = FontWeight.Medium,
+                    color = Color.Black
+                )
+            }
+        }
+    )
+}
+
+private fun generateQrBitmap(content: String, size: Int): Bitmap? {
+    return runCatching {
+        val bitMatrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, size, size)
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        for (x in 0 until size) {
+            for (y in 0 until size) {
+                bitmap.setPixel(x, y, if (bitMatrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+            }
+        }
+        bitmap
+    }.getOrNull()
+}
+
+@Composable
 private fun ExpenseDetailsItem(expense: Expense, userDisplayNames: Map<String, String>) {
     val desc = expense.description.ifBlank { "(No description)" }
     val payerText = expense.payerContributions
@@ -397,7 +494,11 @@ private fun SectionTitle(text: String) {
 }
 
 @Composable
-private fun HeaderChip(label: String, onClick: (() -> Unit)? = null) {
+private fun HeaderChip(
+    label: String,
+    textColor: Color = Color.White,
+    onClick: (() -> Unit)? = null
+) {
     Box(
         modifier = Modifier
             .background(Color(0x14FFFFFF), RoundedCornerShape(999.dp))
@@ -405,7 +506,7 @@ private fun HeaderChip(label: String, onClick: (() -> Unit)? = null) {
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 10.dp, vertical = 6.dp)
     ) {
-        Text(text = label, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        Text(text = label, color = textColor, fontSize = 12.sp, fontWeight = FontWeight.Medium)
     }
 }
 

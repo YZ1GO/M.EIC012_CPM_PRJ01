@@ -1,5 +1,6 @@
 package com.cpm.cleave.ui.theme
 
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
@@ -45,6 +46,7 @@ import androidx.navigation.navArgument
 import com.cpm.cleave.domain.repository.contracts.IAuthRepository
 import com.cpm.cleave.domain.repository.contracts.IExpenseRepository
 import com.cpm.cleave.domain.repository.contracts.IGroupRepository
+import com.cpm.cleave.domain.repository.contracts.IScannerRepository
 import com.cpm.cleave.domain.usecase.GetAddExpenseMembersUseCase
 import com.cpm.cleave.domain.usecase.GetGroupDetailsUseCase
 import com.cpm.cleave.domain.usecase.GetGroupsUseCase
@@ -70,7 +72,12 @@ sealed class NavScreen(val route: String, val title: String, val icon: ImageVect
     object Groups: NavScreen("groups", "Groups", Icons.Default.Groups)
     object Profile: NavScreen("profile", "Profile", Icons.Default.Person)
     object CreateGroup : NavScreen("create_group", "Create Group")
-    object JoinGroup : NavScreen("join_group", "Join Group")
+    object JoinGroup : NavScreen("join_group?joinCode={joinCode}", "Join Group") {
+        fun createRoute(joinCode: String? = null): String {
+            if (joinCode.isNullOrBlank()) return "join_group"
+            return "join_group?joinCode=${Uri.encode(joinCode)}"
+        }
+    }
     object AddExpense : NavScreen("add_expense/{groupId}", "Add Expense") {
         fun createRoute(groupId: String): String = "add_expense/$groupId"
     }
@@ -86,7 +93,9 @@ val navItems = listOf(NavScreen.Groups, NavScreen.Profile)
 fun MainScreen(
     authRepository: IAuthRepository,
     groupRepository: IGroupRepository,
-    expenseRepository: IExpenseRepository
+    expenseRepository: IExpenseRepository,
+    scannerRepository: IScannerRepository,
+    pendingDeepLinkJoinCode: String?
 ) {
     var isAuthCheckInProgress by remember { mutableStateOf(true) }
     var isAuthenticated by remember { mutableStateOf(false) }
@@ -94,6 +103,7 @@ fun MainScreen(
     var openAuthInRegisterMode by remember { mutableStateOf(false) }
     var authFlowSessionKey by remember { mutableIntStateOf(0) }
     var groupsSessionKey by remember { mutableIntStateOf(0) }
+    var lastConsumedDeepLinkJoinCode by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         authRepository.getCurrentUser()
@@ -171,11 +181,25 @@ fun MainScreen(
                 BottomNavigationBar(
                     navController = navController,
                     onCreateGroupClick = { navController.navigate(NavScreen.CreateGroup.route) },
-                    onJoinGroupClick = { navController.navigate(NavScreen.JoinGroup.route) }
+                    onJoinGroupClick = { navController.navigate(NavScreen.JoinGroup.createRoute()) }
                 )
             }
         }
     ) { innerPadding ->
+        LaunchedEffect(isAuthenticated, pendingDeepLinkJoinCode) {
+            val joinCode = pendingDeepLinkJoinCode
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?: return@LaunchedEffect
+
+            if (!isAuthenticated || joinCode == lastConsumedDeepLinkJoinCode) return@LaunchedEffect
+
+            lastConsumedDeepLinkJoinCode = joinCode
+            navController.navigate(NavScreen.JoinGroup.createRoute(joinCode)) {
+                launchSingleTop = true
+            }
+        }
+
         NavHost(
             navController = navController,
             startDestination = NavScreen.Groups.route,
@@ -254,12 +278,31 @@ fun MainScreen(
                 })
             }
 
-            composable(NavScreen.JoinGroup.route) {
-                val joinGroupViewModel: JoinGroupViewModel = viewModel(
-                    factory = viewModelFactory {
-                        initializer { JoinGroupViewModel(RequestJoinGroupUseCase(groupRepository)) }
+            composable(
+                route = NavScreen.JoinGroup.route,
+                arguments = listOf(
+                    navArgument("joinCode") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
                     }
                 )
+            ) { backStackEntry ->
+                val deepLinkJoinCode = backStackEntry.arguments?.getString("joinCode")
+                val joinGroupViewModel: JoinGroupViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer {
+                            JoinGroupViewModel(
+                                requestJoinGroupUseCase = RequestJoinGroupUseCase(groupRepository),
+                                scannerRepository = scannerRepository
+                            )
+                        }
+                    }
+                )
+
+                LaunchedEffect(deepLinkJoinCode) {
+                    joinGroupViewModel.applyDeepLinkJoinCode(deepLinkJoinCode)
+                }
 
                 JoinGroupScreen(joinGroupViewModel, onNavigateBack = {
                     groupsSessionKey += 1

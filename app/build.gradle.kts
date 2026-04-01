@@ -75,4 +75,11 @@ dependencies {
     implementation("androidx.credentials:credentials:1.5.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
     implementation("com.google.android.libraries.identity.googleid:googleid:1.2.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
+
+    implementation("androidx.camera:camera-camera2:1.6.0")
+    implementation("androidx.camera:camera-lifecycle:1.6.0")
+    implementation("androidx.camera:camera-view:1.6.0")
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    implementation("com.google.zxing:core:3.5.4")
 }
