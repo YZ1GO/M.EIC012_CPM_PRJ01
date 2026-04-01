@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -87,7 +88,7 @@ fun ProfileScreen(
         Text("Profile", fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
 
         uiState.errorMessage?.let {
-            Text(text = it, color = Color.Red)
+            Text(text = it, color = MaterialTheme.colorScheme.error)
         }
 
         if (uiState.isLoading || uiState.currentUser == null) {
@@ -106,28 +107,28 @@ fun ProfileScreen(
                 Button(
                     onClick = viewModel::onLogInClicked,
                     enabled = !uiState.isBusy,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF37474F)),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    Text("Log in", color = Color.White)
+                    Text("Log in")
                 }
 
                 Button(
                     onClick = viewModel::onRegisterClicked,
                     enabled = !uiState.isBusy,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00695C)),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    Text("Register account", color = Color.White)
+                    Text("Register account")
                 }
             } else {
                 Button(
                     onClick = viewModel::onSignOutClicked,
                     enabled = !uiState.isBusy,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF37474F)),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    Text("Sign out", color = Color.White)
+                    Text("Sign out")
                 }
             }
         }
@@ -142,16 +143,16 @@ fun ProfileScreen(
             if (isDebuggable) {
                 Spacer(modifier = Modifier.height(16.dp))
                 Text("Debug tools", fontWeight = FontWeight.Medium)
-                Text("Current user id: ${user.id}", color = Color.Gray, fontSize = 12.sp)
+                Text("Current user id: ${user.id}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Button(
                     onClick = viewModel::onSwitchDebugUserClicked,
                     enabled = !uiState.isBusy,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF455A64)),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    Text("Switch Between User A/B", color = Color.White)
+                    Text("Switch Between User A/B")
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -159,10 +160,10 @@ fun ProfileScreen(
                 Button(
                     onClick = viewModel::onClearDebugDataClicked,
                     enabled = !uiState.isBusy,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB00020)),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    Text("Clear All Room Data (Debug)", color = Color.White)
+                    Text("Clear All Room Data (Debug)")
                 }
             }
         }

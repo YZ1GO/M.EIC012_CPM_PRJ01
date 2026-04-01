@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -38,6 +39,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
     val titleTopSpacing = 24.dp
     val titleBottomSpacing = 32.dp
     val sectionSpacing = 16.dp
+    val colorScheme = MaterialTheme.colorScheme
     val labelForMember: (String) -> String = { memberId ->
         uiState.memberDisplayNames[memberId] ?: memberId
     }
@@ -56,7 +58,6 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
         Spacer(modifier = Modifier.height(titleTopSpacing))
         Text(
             text = "Add Expense",
-            color = Color.Unspecified,
             fontSize = 24.sp,
             fontWeight = FontWeight.SemiBold
         )
@@ -66,8 +67,8 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0x14FFFFFF), RoundedCornerShape(16.dp))
-                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(16.dp))
+                .background(colorScheme.surfaceVariant.copy(alpha = 0.24f), RoundedCornerShape(16.dp))
+                .border(1.dp, colorScheme.outlineVariant.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
                 .padding(12.dp)
         ) {
             Text("Amount", fontSize = 14.sp, fontWeight = FontWeight.Medium)
@@ -78,9 +79,9 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color(0x1AFFFFFF),
-                    unfocusedContainerColor = Color(0x1AFFFFFF),
-                    disabledContainerColor = Color(0x10FFFFFF),
+                    focusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
+                    unfocusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
+                    disabledContainerColor = colorScheme.surface.copy(alpha = 0.35f),
                     focusedIndicatorColor = Color.Transparent,
                     unfocusedIndicatorColor = Color.Transparent,
                     disabledIndicatorColor = Color.Transparent
@@ -95,8 +96,8 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0x14FFFFFF), RoundedCornerShape(16.dp))
-                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(16.dp))
+                .background(colorScheme.surfaceVariant.copy(alpha = 0.24f), RoundedCornerShape(16.dp))
+                .border(1.dp, colorScheme.outlineVariant.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
                 .padding(12.dp)
         ) {
             Text("Description", fontSize = 14.sp, fontWeight = FontWeight.Medium)
@@ -107,9 +108,9 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color(0x1AFFFFFF),
-                    unfocusedContainerColor = Color(0x1AFFFFFF),
-                    disabledContainerColor = Color(0x10FFFFFF),
+                    focusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
+                    unfocusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
+                    disabledContainerColor = colorScheme.surface.copy(alpha = 0.35f),
                     focusedIndicatorColor = Color.Transparent,
                     unfocusedIndicatorColor = Color.Transparent,
                     disabledIndicatorColor = Color.Transparent
@@ -124,8 +125,8 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0x14FFFFFF), RoundedCornerShape(16.dp))
-                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(16.dp))
+                .background(colorScheme.surfaceVariant.copy(alpha = 0.24f), RoundedCornerShape(16.dp))
+                .border(1.dp, colorScheme.outlineVariant.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
                 .padding(12.dp)
         ) {
             Text("Who paid and how much?", fontSize = 14.sp, fontWeight = FontWeight.Medium)
@@ -135,23 +136,23 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                 Button(
                     onClick = { viewModel.onBuyerModeChanged(BuyerMode.SINGLE_BUYER) },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (uiState.buyerMode == BuyerMode.SINGLE_BUYER) Color.Blue else Color.Gray
+                        containerColor = if (uiState.buyerMode == BuyerMode.SINGLE_BUYER) colorScheme.primary else colorScheme.secondaryContainer
                     ),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("You paid", color = Color.White)
+                    Text("You paid")
                 }
 
                 Button(
                     onClick = { viewModel.onBuyerModeChanged(BuyerMode.SELECT_BUYERS) },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (uiState.buyerMode == BuyerMode.SELECT_BUYERS) Color.Blue else Color.Gray
+                        containerColor = if (uiState.buyerMode == BuyerMode.SELECT_BUYERS) colorScheme.primary else colorScheme.secondaryContainer
                     ),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Multiple payers", color = Color.White)
+                    Text("Multiple payers")
                 }
             }
 
@@ -160,7 +161,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
             if (uiState.buyerMode == BuyerMode.SINGLE_BUYER) {
                 Text(
                     text = "Buyer: ${uiState.primaryBuyerId.takeIf { it.isNotBlank() }?.let(labelForMember) ?: "(unknown)"} pays full amount",
-                    color = Color.Gray,
+                    color = colorScheme.onSurfaceVariant,
                     fontSize = 12.sp
                 )
             } else {
@@ -195,9 +196,9 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                             modifier = Modifier.weight(0.8f),
                             shape = RoundedCornerShape(10.dp),
                             colors = TextFieldDefaults.colors(
-                                focusedContainerColor = Color(0x1AFFFFFF),
-                                unfocusedContainerColor = Color(0x1AFFFFFF),
-                                disabledContainerColor = Color(0x10FFFFFF),
+                                focusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
+                                unfocusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
+                                disabledContainerColor = colorScheme.surface.copy(alpha = 0.35f),
                                 focusedIndicatorColor = Color.Transparent,
                                 unfocusedIndicatorColor = Color.Transparent,
                                 disabledIndicatorColor = Color.Transparent
@@ -214,7 +215,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = "Contributions: $contributionTotal / ${uiState.amountInput.ifBlank { "0.0" }}",
-                    color = Color.Gray,
+                    color = colorScheme.onSurfaceVariant,
                     fontSize = 12.sp
                 )
             }
@@ -225,8 +226,8 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0x14FFFFFF), RoundedCornerShape(16.dp))
-                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(16.dp))
+                .background(colorScheme.surfaceVariant.copy(alpha = 0.24f), RoundedCornerShape(16.dp))
+                .border(1.dp, colorScheme.outlineVariant.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
                 .padding(12.dp)
         ) {
             Text("How to split?", fontSize = 14.sp, fontWeight = FontWeight.Medium)
@@ -236,23 +237,23 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                 Button(
                     onClick = { viewModel.onSplitModeChanged(SplitMode.ALL_MEMBERS) },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (uiState.splitMode == SplitMode.ALL_MEMBERS) Color.Blue else Color.Gray
+                        containerColor = if (uiState.splitMode == SplitMode.ALL_MEMBERS) colorScheme.primary else colorScheme.secondaryContainer
                     ),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("All members", color = Color.White)
+                    Text("All members")
                 }
 
                 Button(
                     onClick = { viewModel.onSplitModeChanged(SplitMode.SELECTED_MEMBERS) },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (uiState.splitMode == SplitMode.SELECTED_MEMBERS) Color.Blue else Color.Gray
+                        containerColor = if (uiState.splitMode == SplitMode.SELECTED_MEMBERS) colorScheme.primary else colorScheme.secondaryContainer
                     ),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Selected members", color = Color.White)
+                    Text("Selected members")
                 }
             }
 
@@ -277,7 +278,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                         )
                         Text(
                             text = if (isPayer) "${labelForMember(memberId)} (payer, required)" else labelForMember(memberId),
-                            color = Color.Gray
+                            color = colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -287,23 +288,20 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
         Spacer(modifier = Modifier.height(24.dp))
 
         uiState.errorMessage?.let {
-            Text(text = it, color = Color.Red, fontSize = 14.sp)
+            Text(text = it, color = colorScheme.error, fontSize = 14.sp)
             Spacer(modifier = Modifier.height(12.dp))
         }
 
         Button(
             onClick = { viewModel.createExpense(onSuccess = onNavigateBack) },
-            colors = ButtonDefaults.buttonColors(containerColor = Color.Blue),
+            colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primary),
             shape = RoundedCornerShape(8.dp),
             enabled = !uiState.isLoading,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp)
         ) {
-            Text(
-                if (uiState.isLoading) "Creating..." else "Create Expense",
-                color = Color.White
-            )
+            Text(if (uiState.isLoading) "Creating..." else "Create Expense")
         }
     }
 }

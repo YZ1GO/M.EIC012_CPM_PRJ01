@@ -20,6 +20,7 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -52,7 +53,7 @@ fun CreateGroupScreen(viewModel: CreateGroupViewModel, onNavigateBack: () -> Uni
 
         Text(
             text = "Create Group",
-            color = Color.Blue,
+            color = MaterialTheme.colorScheme.primary,
             fontSize = 24.sp,
             fontWeight = FontWeight.Medium
         )
@@ -124,7 +125,7 @@ fun CreateGroupScreen(viewModel: CreateGroupViewModel, onNavigateBack: () -> Uni
         uiState.errorMessage?.let { message ->
             Text(
                 text = message,
-                color = Color.Red,
+                color = MaterialTheme.colorScheme.error,
                 fontSize = 14.sp
             )
             Spacer(modifier = Modifier.height(12.dp))
@@ -135,14 +136,13 @@ fun CreateGroupScreen(viewModel: CreateGroupViewModel, onNavigateBack: () -> Uni
                 viewModel.createGroup(onSuccess = onNavigateBack)
             },
             enabled = !uiState.isLoading,
-            colors = ButtonDefaults.buttonColors(containerColor = Color.Blue),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
             shape = RoundedCornerShape(8.dp),
             modifier = Modifier.height(48.dp)
         ) {
             Text(
                 text = if (uiState.isLoading) "Creating..." else "Create Group",
-                fontSize = 16.sp,
-                color = Color.White
+                fontSize = 16.sp
             )
         }
     }

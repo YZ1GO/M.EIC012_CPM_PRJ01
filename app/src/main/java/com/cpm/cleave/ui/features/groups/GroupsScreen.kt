@@ -33,6 +33,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -118,7 +119,7 @@ fun GroupsScreen(groupsViewModel: GroupsViewModel, onGroupClick: (String) -> Uni
         }
 
         uiState.errorMessage?.let { message ->
-            Text(text = message, color = Color.Red)
+            Text(text = message, color = MaterialTheme.colorScheme.error)
             Spacer(modifier = Modifier.height(12.dp))
             Button(onClick = { groupsViewModel.loadGroups() }) {
                 Text("Retry")
@@ -129,7 +130,7 @@ fun GroupsScreen(groupsViewModel: GroupsViewModel, onGroupClick: (String) -> Uni
         if (displayedGroups.isEmpty()) {
             Text(
                 text = if (uiState.searchQuery.isBlank()) "No groups yet." else "No matching groups.",
-                color = Color.Gray
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             return@Column
         }
@@ -154,10 +155,10 @@ fun GroupListItem(group: Group, onClick: () -> Unit) {
     ) {
         // TODO CHANGE BOX TO IMAGE
         Box(
-            modifier = Modifier.size(64.dp).border(1.dp, Color.Gray, RoundedCornerShape(8.dp)),
+            modifier = Modifier.size(64.dp).border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.Center
         ) {
-            Text("?", fontSize = 32.sp, color = Color.Gray)
+            Text("?", fontSize = 32.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
         Spacer(modifier = Modifier.width(16.dp))
@@ -170,12 +171,12 @@ fun GroupListItem(group: Group, onClick: () -> Unit) {
             )
             Text(
                 text = "Currency: ${group.currency}",
-                color = Color.Gray,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 14.sp
             )
             Text(
                 text = "Code: ${group.joinCode}",
-                color = Color.Gray,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 14.sp
             )
         }
@@ -196,6 +197,7 @@ fun GroupDetailsScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var showQrDialog by remember { mutableStateOf(false) }
+    val colorScheme = MaterialTheme.colorScheme
 
     LaunchedEffect(Unit) { viewModel.refreshGroupData() }
 
@@ -211,8 +213,8 @@ fun GroupDetailsScreen(
 
     val sectionModifier = Modifier
         .fillMaxWidth()
-        .background(Color(0x14FFFFFF), RoundedCornerShape(16.dp))
-        .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(16.dp))
+        .background(colorScheme.surfaceVariant.copy(alpha = 0.24f), RoundedCornerShape(16.dp))
+        .border(1.dp, colorScheme.outlineVariant.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
         .padding(12.dp)
 
     Column(
@@ -226,7 +228,7 @@ fun GroupDetailsScreen(
 
         val currentGroup = uiState.group
         if (currentGroup == null) {
-            Text("Loading group...", color = Color.Gray, fontSize = 13.sp)
+            Text("Loading group...", color = colorScheme.onSurfaceVariant, fontSize = 13.sp)
             return@Column
         }
 
@@ -236,7 +238,7 @@ fun GroupDetailsScreen(
             HeaderChip(label = currentGroup.currency)
             HeaderChip(
                 label = "Code ${currentGroup.joinCode}",
-                textColor = Color.Black,
+                textColor = colorScheme.onSurface,
                 onClick = {
                     coroutineScope.launch {
                         clipboard.setClipEntry(
@@ -276,19 +278,19 @@ fun GroupDetailsScreen(
             )
         }
 
-        uiState.errorMessage?.let { Text(it, color = Color.Red) }
+        uiState.errorMessage?.let { Text(it, color = colorScheme.error) }
 
         Column(modifier = sectionModifier) {
             SectionTitle("Members")
             Text(
                 text = "${currentGroup.members.size} members",
-                color = Color.Gray,
+                color = colorScheme.onSurfaceVariant,
                 fontSize = 13.sp
             )
             Spacer(modifier = Modifier.height(10.dp))
 
             if (currentGroup.members.isEmpty()) {
-                Text("No members in this group yet.", color = Color.White, fontSize = 13.sp)
+                Text("No members in this group yet.", color = colorScheme.onSurfaceVariant, fontSize = 13.sp)
             } else {
                 Row(
                     modifier = Modifier
@@ -309,13 +311,13 @@ fun GroupDetailsScreen(
             SectionTitle("Expenses")
             Text(
                 text = "${uiState.expenses.size} total",
-                color = Color.White,
+                color = colorScheme.onSurfaceVariant,
                 fontSize = 13.sp
             )
             Spacer(modifier = Modifier.height(6.dp))
 
             if (uiState.expenses.isEmpty()) {
-                Text("No expenses yet.", color = Color.White, fontSize = 13.sp)
+                Text("No expenses yet.", color = colorScheme.onSurfaceVariant, fontSize = 13.sp)
             } else {
                 uiState.expenses.forEach { expense ->
                     ExpenseDetailsItem(
@@ -331,13 +333,13 @@ fun GroupDetailsScreen(
             SectionTitle("Debts")
             Text(
                 text = "${uiState.debts.size} open",
-                color = Color.Gray,
+                color = colorScheme.onSurfaceVariant,
                 fontSize = 13.sp
             )
             Spacer(modifier = Modifier.height(6.dp))
 
             if (uiState.debtsWithReason.isEmpty()) {
-                Text("No debts yet.", color = Color.Black, fontSize = 13.sp)
+                Text("No debts yet.", color = colorScheme.onSurfaceVariant, fontSize = 13.sp)
             } else {
                 uiState.debtsWithReason.forEach { debtWithReason ->
                     val debt = debtWithReason.debt
@@ -351,12 +353,12 @@ fun GroupDetailsScreen(
                             text = "$fromName owes $toName: ${"%.2f".format(Locale.getDefault(), debt.amount)}",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Medium,
-                            color = Color.Black
+                            color = colorScheme.onSurface
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = reasonText,
-                            color = Color.Black,
+                            color = colorScheme.onSurfaceVariant,
                             fontSize = 12.sp,
                             fontStyle = FontStyle.Italic
                         )
@@ -369,13 +371,13 @@ fun GroupDetailsScreen(
 
         Button(
             onClick = { onAddExpenseClick(currentGroup.id) },
-            colors = ButtonDefaults.buttonColors(containerColor = Color.Blue),
+            colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primary),
             shape = RoundedCornerShape(8.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp)
         ) {
-            Text("Add Expense", color = Color.White)
+            Text("Add Expense")
         }
 
         Spacer(modifier = Modifier.height(sectionSpacing))
@@ -415,8 +417,7 @@ private fun GroupQrDialog(
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = "Join code: $joinCode",
-                    fontWeight = FontWeight.Medium,
-                    color = Color.Black
+                    fontWeight = FontWeight.Medium
                 )
             }
         }
@@ -452,8 +453,8 @@ private fun ExpenseDetailsItem(expense: Expense, userDisplayNames: Map<String, S
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 6.dp)
-            .background(Color(0x1AFFFFFF), RoundedCornerShape(14.dp))
-            .border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
             .padding(12.dp)
     ) {
         Row(
@@ -466,13 +467,13 @@ private fun ExpenseDetailsItem(expense: Expense, userDisplayNames: Map<String, S
                     text = desc,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.Black
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = payerText,
                     fontSize = 12.sp,
-                    color = Color.Black
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             Spacer(modifier = Modifier.width(12.dp))
@@ -480,11 +481,11 @@ private fun ExpenseDetailsItem(expense: Expense, userDisplayNames: Map<String, S
                 text = expense.amount.toString(),
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color.Black
+                color = MaterialTheme.colorScheme.onSurface
             )
         }
         Spacer(modifier = Modifier.height(4.dp))
-        Text(text = dateText, color = Color.Black, fontSize = 11.sp)
+        Text(text = dateText, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
     }
 }
 
@@ -496,13 +497,13 @@ private fun SectionTitle(text: String) {
 @Composable
 private fun HeaderChip(
     label: String,
-    textColor: Color = Color.White,
+    textColor: Color = MaterialTheme.colorScheme.onSurface,
     onClick: (() -> Unit)? = null
 ) {
     Box(
         modifier = Modifier
-            .background(Color(0x14FFFFFF), RoundedCornerShape(999.dp))
-            .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(999.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.24f), RoundedCornerShape(999.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f), RoundedCornerShape(999.dp))
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 10.dp, vertical = 6.dp)
     ) {

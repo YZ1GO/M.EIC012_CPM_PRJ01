@@ -26,6 +26,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
@@ -73,7 +74,7 @@ fun JoinGroupScreen(viewModel: JoinGroupViewModel, onNavigateBack: () -> Unit) {
 
         Text(
             text = "Join Group",
-            color = Color.Blue,
+            color = MaterialTheme.colorScheme.primary,
             fontSize = 24.sp,
             fontWeight = FontWeight.Medium
         )
@@ -107,7 +108,7 @@ fun JoinGroupScreen(viewModel: JoinGroupViewModel, onNavigateBack: () -> Unit) {
                         requestPermissionLauncher.launch(Manifest.permission.CAMERA)
                     }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF263238)),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.fillMaxWidth().height(44.dp),
                 enabled = !uiState.isLoading
@@ -116,11 +117,11 @@ fun JoinGroupScreen(viewModel: JoinGroupViewModel, onNavigateBack: () -> Unit) {
                     Icon(
                         imageVector = Icons.Default.QrCodeScanner,
                         contentDescription = null,
-                        tint = Color.White,
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.size(8.dp))
-                    Text(text = "Scan QR Code", color = Color.White)
+                    Text(text = "Scan QR Code")
                 }
             }
         }
@@ -130,7 +131,7 @@ fun JoinGroupScreen(viewModel: JoinGroupViewModel, onNavigateBack: () -> Unit) {
         uiState.errorMessage?.let { message ->
             Text(
                 text = message,
-                color = Color.Red,
+                color = MaterialTheme.colorScheme.error,
                 fontSize = 14.sp
             )
             Spacer(modifier = Modifier.height(12.dp))
@@ -140,15 +141,14 @@ fun JoinGroupScreen(viewModel: JoinGroupViewModel, onNavigateBack: () -> Unit) {
             onClick = {
                 viewModel.joinGroup(onSuccess = onNavigateBack)
             },
-            colors = ButtonDefaults.buttonColors(containerColor = Color.Blue),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
             shape = RoundedCornerShape(8.dp),
             modifier = Modifier.height(48.dp).fillMaxWidth(),
             enabled = !uiState.isLoading
         ) {
             Text(
                 if (uiState.isLoading) "Joining..." else "Join Group",
-                fontSize = 16.sp,
-                color = Color.White
+                fontSize = 16.sp
             )
         }
 
