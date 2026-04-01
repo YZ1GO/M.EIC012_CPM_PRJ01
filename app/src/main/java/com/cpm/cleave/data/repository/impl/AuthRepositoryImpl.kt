@@ -389,56 +389,80 @@ override suspend fun signUpWithEmail(
         kotlinx.coroutines.delay(500)
 
         // =========================================================================
-        // PHASE 2: Cache-Driven Reassignment (Zero Cloud Reads)
-        // We use our local Room DB to figure out what needs to change in the cloud.
+        // PHASE 2: Remote-Driven Reassignment
+        // Read remote expenses directly. Local data may already be rekeyed, which
+        // would hide stale anonymous references still present in Firestore.
         // =========================================================================
         var secondBatch = firestore.batch()
         var opCount = 0
+        suspend fun ensureCapacity(requiredOps: Int) {
+            if (opCount + requiredOps > maxBatchSize) {
+                if (opCount > 0) {
+                    secondBatch.commit().awaitTaskResult()
+                }
+                secondBatch = firestore.batch()
+                opCount = 0
+            }
+        }
 
         candidateGroupIds.forEach { groupId ->
             val groupRef = firestore.collection("groups").document(groupId)
 
-            // 1. Reassign Expenses using LOCAL Cache
-            val localExpenses = cache.getExpensesByGroup(groupId)
-            localExpenses.forEach { expense ->
-                val expenseRef = groupRef.collection("expenses").document(expense.id)
+            // 1. Reassign Expenses using REMOTE docs
+            val expensesSnapshot = groupRef.collection("expenses").get().awaitTaskResult()
+            expensesSnapshot.documents.forEach { expenseDoc ->
+                val expenseRef = expenseDoc.reference
 
                 // Swap paidByUserId if necessary
-                if (expense.paidByUserId == oldUserId) {
-                    if (opCount >= maxBatchSize) { secondBatch.commit().awaitTaskResult(); secondBatch = firestore.batch(); opCount = 0 }
+                if (expenseDoc.getString("paidByUserId") == oldUserId) {
+                    ensureCapacity(1)
                     secondBatch.update(expenseRef, mapOf("paidByUserId" to newUserId, "updatedAt" to now))
                     opCount++
                 }
 
                 // Swap Payers
-                val payers = cache.getExpensePayersForExpense(expense.id)
-                val oldPayer = payers.find { it.userId == oldUserId }
-                if (oldPayer != null) {
-                    if (opCount >= maxBatchSize - 1) { secondBatch.commit().awaitTaskResult(); secondBatch = firestore.batch(); opCount = 0 }
+                val payersSnapshot = expenseRef.collection("payers").get().awaitTaskResult()
+                val oldPayerDoc = payersSnapshot.documents.firstOrNull { payerDoc ->
+                    payerDoc.getString("userId") == oldUserId || payerDoc.id == oldUserId
+                }
+                if (oldPayerDoc != null) {
+                    ensureCapacity(2)
                     secondBatch.delete(expenseRef.collection("payers").document(oldUserId))
                     secondBatch.set(
                         expenseRef.collection("payers").document(newUserId),
-                        mapOf("userId" to newUserId, "amount" to oldPayer.amount, "updatedAt" to now)
+                        mapOf(
+                            "userId" to newUserId,
+                            "amount" to (oldPayerDoc.getDouble("amount") ?: 0.0),
+                            "updatedAt" to now
+                        ),
+                        SetOptions.merge()
                     )
                     opCount += 2
                 }
 
                 // Swap Splits
-                val splits = cache.getExpenseSharesForExpense(expense.id)
-                val oldSplit = splits.find { it.userId == oldUserId }
-                if (oldSplit != null) {
-                    if (opCount >= maxBatchSize - 1) { secondBatch.commit().awaitTaskResult(); secondBatch = firestore.batch(); opCount = 0 }
+                val splitsSnapshot = expenseRef.collection("splits").get().awaitTaskResult()
+                val oldSplitDoc = splitsSnapshot.documents.firstOrNull { splitDoc ->
+                    splitDoc.getString("userId") == oldUserId || splitDoc.id == oldUserId
+                }
+                if (oldSplitDoc != null) {
+                    ensureCapacity(2)
                     secondBatch.delete(expenseRef.collection("splits").document(oldUserId))
                     secondBatch.set(
                         expenseRef.collection("splits").document(newUserId),
-                        mapOf("userId" to newUserId, "amount" to oldSplit.amount, "updatedAt" to now)
+                        mapOf(
+                            "userId" to newUserId,
+                            "amount" to (oldSplitDoc.getDouble("amount") ?: 0.0),
+                            "updatedAt" to now
+                        ),
+                        SetOptions.merge()
                     )
                     opCount += 2
                 }
             }
 
             // 2. Delete the old guest member document
-            if (opCount >= maxBatchSize) { secondBatch.commit().awaitTaskResult(); secondBatch = firestore.batch(); opCount = 0 }
+            ensureCapacity(1)
             secondBatch.delete(groupRef.collection("members").document(oldUserId))
             opCount++
         }
