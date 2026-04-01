@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.cpm.cleave",
+      "sha256_cert_fingerprints": [
+        "46:15:A3:D9:A0:FC:F0:2A:ED:12:4E:4D:DF:74:42:3E:07:5E:29:9C:58:F3:73:43:DE:21:F8:75:4B:59:7D:24"
+      ]
+    }
+  }
+]

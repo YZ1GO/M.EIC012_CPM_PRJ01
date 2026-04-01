@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cleave Join</title>
+    <meta name="description" content="Open Cleave and join a group invite." />
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #0b1220;
+        --card: #111a2e;
+        --card-2: #16213a;
+        --text: #f8fafc;
+        --muted: #cbd5e1;
+        --accent: #38bdf8;
+        --accent-2: #0ea5e9;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: radial-gradient(circle at top, #1e293b 0%, var(--bg) 55%);
+        color: var(--text);
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      .card {
+        width: min(100%, 560px);
+        background: linear-gradient(180deg, var(--card), var(--card-2));
+        border: 1px solid rgba(255,255,255,.08);
+        border-radius: 24px;
+        padding: 28px;
+        box-shadow: 0 30px 80px rgba(0,0,0,.35);
+      }
+      h1 { margin: 0 0 12px; font-size: 2rem; }
+      p { color: var(--muted); line-height: 1.5; }
+      .code {
+        margin: 16px 0 22px;
+        padding: 14px 16px;
+        border-radius: 16px;
+        background: rgba(255,255,255,.06);
+        font-weight: 700;
+        letter-spacing: .08em;
+        word-break: break-word;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        border: 0;
+        border-radius: 999px;
+        padding: 14px 18px;
+        text-decoration: none;
+        font-weight: 700;
+        color: #04111d;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      }
+      .small {
+        margin-top: 14px;
+        font-size: .92rem;
+        color: var(--muted);
+      }
+      .label {
+        font-size: .8rem;
+        text-transform: uppercase;
+        letter-spacing: .14em;
+        color: #93c5fd;
+      }
+    </style>
+    <script>
+      function getJoinCode() {
+        const params = new URLSearchParams(window.location.search);
+        const joinCode = params.get("joinCode") || "";
+        return joinCode.trim().toUpperCase();
+      }
+
+      function updatePage() {
+        const joinCode = getJoinCode();
+        const codeEl = document.getElementById("joinCode");
+        const openBtn = document.getElementById("openApp");
+        const fallback = document.getElementById("fallbackText");
+        const fallbackUrl = joinCode
+          ? `https://cpmcleave.netlify.app/join?joinCode=${encodeURIComponent(joinCode)}`
+          : "https://cpmcleave.netlify.app/join";
+        const appUrl = joinCode
+          ? `intent://join?joinCode=${encodeURIComponent(joinCode)}#Intent;scheme=cleave;package=com.cpm.cleave;S.browser_fallback_url=${encodeURIComponent(fallbackUrl)};end`
+          : `intent://join#Intent;scheme=cleave;package=com.cpm.cleave;S.browser_fallback_url=${encodeURIComponent(fallbackUrl)};end`;
+
+        codeEl.textContent = joinCode || "Missing join code";
+        openBtn.href = appUrl;
+        fallback.textContent = joinCode
+          ? "If the app is installed, tap Open App. Otherwise, install Cleave and try again."
+          : "The link is missing a join code.";
+      }
+
+      window.addEventListener("DOMContentLoaded", updatePage);
+    </script>
+  </head>
+  <body>
+    <main class="card">
+      <div class="label">Cleave invite</div>
+      <h1>Open the app to join</h1>
+      <p>This page is a fallback if the app link does not open automatically.</p>
+      <div class="code" id="joinCode">Loading...</div>
+      <a class="btn" id="openApp" href="#">Open App</a>
+      <div class="small" id="fallbackText"></div>
+    </main>
+  </body>
+</html>
