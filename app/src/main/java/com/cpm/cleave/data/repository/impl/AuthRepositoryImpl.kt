@@ -41,8 +41,10 @@ class AuthRepositoryImpl(
                     )
                     Result.success(activatedAnonymous)
                 } else {
-                    val localMergedUser = authSessionStore.getUserById(firebaseUser.uid)
-                    val resolvedUser = localMergedUser ?: authSessionStore.activateRegisteredUserAfterAuthentication(
+                    // Always reactivate the authenticated registered user in local session state.
+                    // A previous sign-out marks users as deleted locally, and simply returning the
+                    // cached record can leave observeActiveUser() empty.
+                    val resolvedUser = authSessionStore.activateRegisteredUserAfterAuthentication(
                         registeredUserId = firebaseUser.uid,
                         registeredName = firebaseUser.displayName ?: firebaseUser.email?.substringBefore("@") ?: "User",
                         registeredEmail = firebaseUser.email,
@@ -231,25 +233,6 @@ override suspend fun signUpWithEmail(
             authSessionStore.clearAllActiveSessionUsers()
             // Keep local cache so a subsequent sign-in can immediately recover user-scoped data
             // (groups are still filtered by active user membership).
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    // TODO: delete
-    override suspend fun switchDebugAnonymousUser(defaultName: String): Result<User> {
-        return try {
-            Result.success(authSessionStore.switchToNewDebugAnonymousUser(defaultName))
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    // TODO: delete
-    override suspend fun clearDebugDatabase(): Result<Unit> {
-        return try {
-            authSessionStore.clearAllDebugData()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

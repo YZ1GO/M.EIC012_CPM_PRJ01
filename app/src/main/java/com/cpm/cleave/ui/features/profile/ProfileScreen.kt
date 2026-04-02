@@ -1,6 +1,5 @@
 package com.cpm.cleave.ui.features.profile
 
-import android.content.pm.ApplicationInfo
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -32,14 +31,11 @@ import androidx.credentials.CredentialManager
 fun ProfileScreen(
     viewModel: ProfileViewModel,
     onSignedOut: () -> Unit = {},
-    onRegisterRequested: () -> Unit = {},
-    onDebugUserSwitched: () -> Unit = {},
-    onDebugDataCleared: () -> Unit = {}
+    onRegisterRequested: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val credentialManager = remember(context) { CredentialManager.create(context) }
-    val isDebuggable = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
     LaunchedEffect(Unit) {
         viewModel.uiEffect.collect { effect ->
@@ -66,14 +62,6 @@ fun ProfileScreen(
                     }
                     Toast.makeText(context, "Signed out", Toast.LENGTH_SHORT).show()
                     onSignedOut()
-                }
-
-                ProfileUiEffect.DebugDataCleared -> {
-                    onDebugDataCleared()
-                }
-
-                ProfileUiEffect.DebugUserSwitched -> {
-                    onDebugUserSwitched()
                 }
             }
         }
@@ -137,35 +125,6 @@ fun ProfileScreen(
             Spacer(modifier = Modifier.height(8.dp))
             Text("Anonymous limits", fontWeight = FontWeight.Medium)
             Text("- Max groups: ${uiState.maxGroups}")
-            
-
-            // TODO: delete
-            if (isDebuggable) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Text("Debug tools", fontWeight = FontWeight.Medium)
-                Text("Current user id: ${user.id}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Button(
-                    onClick = viewModel::onSwitchDebugUserClicked,
-                    enabled = !uiState.isBusy,
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text("Switch Between User A/B")
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Button(
-                    onClick = viewModel::onClearDebugDataClicked,
-                    enabled = !uiState.isBusy,
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text("Clear All Room Data (Debug)")
-                }
-            }
         }
     }
 }

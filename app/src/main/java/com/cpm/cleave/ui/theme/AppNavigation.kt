@@ -240,21 +240,6 @@ fun MainScreen(
                         openAuthInRegisterMode = true
                         authFlowSessionKey += 1
                         isAuthenticated = false
-                    },
-                    // TODO(debug-cleanup): remove this callback when debug switch-user tools are removed.
-                    onDebugUserSwitched = {
-                        groupsSessionKey += 1
-                    },
-                    // TODO(debug-cleanup): remove this callback and groupsSessionKey when debug clear-data tools are removed.
-                    onDebugDataCleared = {
-                        groupsSessionKey += 1
-                        navController.navigate(NavScreen.Groups.route) {
-                            popUpTo(navController.graph.startDestinationId) {
-                                saveState = false
-                            }
-                            launchSingleTop = true
-                            restoreState = false
-                        }
                     }
                 )
             }

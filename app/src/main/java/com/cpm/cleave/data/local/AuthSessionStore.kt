@@ -32,7 +32,7 @@ class AuthSessionStore(context: Context) {
         val active = userDao.getActiveUser() ?: return
         userDao.updateUser(
             active.copy(
-                isDeleted = true,
+                isSessionActive = false,
                 lastSeen = System.currentTimeMillis()
             )
         )
@@ -41,11 +41,11 @@ class AuthSessionStore(context: Context) {
     suspend fun clearAllActiveSessionUsers() {
         val now = System.currentTimeMillis()
         userDao.getAllUsers()
-            .filter { !it.isDeleted }
+            .filter { it.isSessionActive }
             .forEach { activeUser ->
                 userDao.updateUser(
                     activeUser.copy(
-                        isDeleted = true,
+                        isSessionActive = false,
                         lastSeen = now
                     )
                 )
@@ -55,7 +55,7 @@ class AuthSessionStore(context: Context) {
     suspend fun getOrCreateUser(userName: String): User {
         return database.withTransaction {
             val now = System.currentTimeMillis()
-            val activeUsers = userDao.getAllUsers().filter { !it.isDeleted }
+            val activeUsers = userDao.getAllUsers().filter { !it.isDeleted && it.isSessionActive }
             val activeAnonymous = activeUsers.firstOrNull { it.isAnonymous }
 
             if (activeAnonymous != null) {
@@ -64,7 +64,7 @@ class AuthSessionStore(context: Context) {
                     .forEach { staleActive ->
                         userDao.updateUser(
                             staleActive.copy(
-                                isDeleted = true,
+                                isSessionActive = false,
                                 lastSeen = now
                             )
                         )
@@ -72,7 +72,7 @@ class AuthSessionStore(context: Context) {
 
                 val refreshedAnonymous = activeAnonymous.copy(
                     name = activeAnonymous.name.ifBlank { userName },
-                    isDeleted = false,
+                    isSessionActive = true,
                     lastSeen = now
                 )
                 userDao.updateUser(refreshedAnonymous)
@@ -82,7 +82,7 @@ class AuthSessionStore(context: Context) {
             activeUsers.forEach { staleActive ->
                 userDao.updateUser(
                     staleActive.copy(
-                        isDeleted = true,
+                        isSessionActive = false,
                         lastSeen = now
                     )
                 )
@@ -94,6 +94,7 @@ class AuthSessionStore(context: Context) {
                 email = null,
                 isAnonymous = true,
                 isDeleted = false,
+                isSessionActive = true,
                 lastSeen = now
             )
             userDao.insertUser(anonymousUser)
@@ -120,6 +121,7 @@ class AuthSessionStore(context: Context) {
                         email = registeredEmail,
                         isAnonymous = false,
                         isDeleted = false,
+                        isSessionActive = true,
                         lastSeen = now
                     )
                 )
@@ -130,6 +132,7 @@ class AuthSessionStore(context: Context) {
                         email = registeredEmail,
                         isAnonymous = false,
                         isDeleted = false,
+                        isSessionActive = true,
                         lastSeen = now
                     )
                 )
@@ -163,18 +166,18 @@ class AuthSessionStore(context: Context) {
 
                 userDao.updateUser(
                     activeAnonymous.copy(
-                        isDeleted = true,
+                        isSessionActive = false,
                         lastSeen = now
                     )
                 )
             }
 
             userDao.getAllUsers()
-                .filter { !it.isDeleted && it.id != registeredUserId }
+                .filter { it.isSessionActive && it.id != registeredUserId }
                 .forEach { staleActive ->
                     userDao.updateUser(
                         staleActive.copy(
-                            isDeleted = true,
+                            isSessionActive = false,
                             lastSeen = now
                         )
                     )
@@ -202,6 +205,7 @@ class AuthSessionStore(context: Context) {
                         email = null,
                         isAnonymous = true,
                         isDeleted = false,
+                        isSessionActive = true,
                         lastSeen = now
                     )
                 )
@@ -212,17 +216,18 @@ class AuthSessionStore(context: Context) {
                         email = null,
                         isAnonymous = true,
                         isDeleted = false,
+                        isSessionActive = true,
                         lastSeen = now
                     )
                 )
             }
 
             userDao.getAllUsers()
-                .filter { !it.isDeleted && it.id != anonymousUserId }
+                .filter { it.isSessionActive && it.id != anonymousUserId }
                 .forEach { staleActive ->
                     userDao.updateUser(
                         staleActive.copy(
-                            isDeleted = true,
+                            isSessionActive = false,
                             lastSeen = now
                         )
                     )
@@ -231,65 +236,6 @@ class AuthSessionStore(context: Context) {
             val activeAnonymous = userDao.getUserById(anonymousUserId)
                 ?: throw IllegalStateException("Could not activate anonymous user locally.")
             activeAnonymous.toDomain()
-        }
-    }
-
-    // TODO: delete
-    suspend fun switchToNewDebugAnonymousUser(baseName: String = "Guest"): User {
-        val now = System.currentTimeMillis()
-        val userAId = "anon_debug_A"
-        val userBId = "anon_debug_B"
-
-        val userA = userDao.getUserById(userAId) ?: UserEntity(
-            id = userAId,
-            name = "$baseName A",
-            email = null,
-            isAnonymous = true,
-            isDeleted = true,
-            lastSeen = now
-        ).also { userDao.insertUser(it) }
-
-        val userB = userDao.getUserById(userBId) ?: UserEntity(
-            id = userBId,
-            name = "$baseName B",
-            email = null,
-            isAnonymous = true,
-            isDeleted = true,
-            lastSeen = now
-        ).also { userDao.insertUser(it) }
-
-        val active = userDao.getActiveUser()
-        val nextUserId = if (active?.id == userAId) userBId else userAId
-
-        userDao.getAllUsers()
-            .filter { it.isAnonymous && !it.isDeleted }
-            .forEach {
-                userDao.updateUser(it.copy(isDeleted = true, lastSeen = now))
-            }
-
-        val activateA = nextUserId == userAId
-        userDao.updateUser(
-            userA.copy(
-                isDeleted = !activateA,
-                lastSeen = now
-            )
-        )
-        userDao.updateUser(
-            userB.copy(
-                isDeleted = activateA,
-                lastSeen = now
-            )
-        )
-
-        val switchedUser = userDao.getUserById(nextUserId)
-            ?: throw IllegalStateException("Could not switch debug user.")
-        return switchedUser.toDomain()
-    }
-
-    // TODO: delete
-    suspend fun clearAllDebugData() {
-        withContext(Dispatchers.IO) {
-            database.clearAllTables()
         }
     }
 

@@ -25,8 +25,4 @@ interface IAuthRepository {
     ): Result<User>
     suspend fun signOut(): Result<Unit>
 
-    // TODO: delete
-    suspend fun switchDebugAnonymousUser(defaultName: String = "Guest"): Result<User>
-    // TODO: delete
-    suspend fun clearDebugDatabase(): Result<Unit>
 }

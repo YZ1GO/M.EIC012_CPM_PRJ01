@@ -26,12 +26,12 @@ interface UserDao {
     @Query("SELECT * FROM users")
     suspend fun getAllUsers(): List<UserEntity>
 
-    @Query("SELECT * FROM users WHERE isDeleted = 0 ORDER BY lastSeen DESC LIMIT 1")
+    @Query("SELECT * FROM users WHERE isDeleted = 0 AND isSessionActive = 1 ORDER BY lastSeen DESC LIMIT 1")
     suspend fun getActiveUser(): UserEntity?
 
-    @Query("SELECT * FROM users WHERE isAnonymous = 1 AND isDeleted = 0 LIMIT 1")
+    @Query("SELECT * FROM users WHERE isAnonymous = 1 AND isDeleted = 0 AND isSessionActive = 1 LIMIT 1")
     suspend fun getActiveAnonymousUser(): UserEntity?
 
-    @Query("SELECT * FROM users WHERE isDeleted = 0 AND lastSeen = (SELECT MAX(lastSeen) FROM users WHERE isDeleted = 0) LIMIT 1")
+    @Query("SELECT * FROM users WHERE isDeleted = 0 AND isSessionActive = 1 AND lastSeen = (SELECT MAX(lastSeen) FROM users WHERE isDeleted = 0 AND isSessionActive = 1) LIMIT 1")
     fun observeActiveUser(): Flow<UserEntity?>
 }

@@ -35,7 +35,7 @@ import com.cpm.cleave.data.local.entities.UserEntity
         DebtEntity::class,
         PaymentEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class CleaveDatabase : RoomDatabase() {
@@ -65,7 +65,7 @@ abstract class CleaveDatabase : RoomDatabase() {
                     builder.fallbackToDestructiveMigration(dropAllTables = true)
                 }
 
-                builder.addMigrations(MIGRATION_2_3)
+                builder.addMigrations(MIGRATION_2_3, MIGRATION_3_4)
 
                 val instance = builder.build()
                 INSTANCE = instance
@@ -76,6 +76,14 @@ abstract class CleaveDatabase : RoomDatabase() {
         private val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE expenses ADD COLUMN receiptItemsJson TEXT")
+            }
+        }
+
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE users ADD COLUMN isSessionActive INTEGER NOT NULL DEFAULT 0")
+                // Preserve previous semantics where non-deleted users were treated as active.
+                db.execSQL("UPDATE users SET isSessionActive = CASE WHEN isDeleted = 0 THEN 1 ELSE 0 END")
             }
         }
     }

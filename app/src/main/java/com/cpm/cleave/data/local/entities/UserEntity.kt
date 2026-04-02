@@ -11,5 +11,6 @@ data class UserEntity(
     val email: String?,
     val isAnonymous: Boolean,
     val isDeleted: Boolean,
+    val isSessionActive: Boolean = false,
     val lastSeen: Long
 )
