@@ -31,7 +31,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -43,7 +42,17 @@ fun CreateGroupScreen(viewModel: CreateGroupViewModel, onNavigateBack: () -> Uni
     val uiState by viewModel.uiState.collectAsState()
 
     var expanded by remember { mutableStateOf(false) }
-    val currencies = listOf("Euro", "USD", "GBP")
+    val filteredCurrencyOptions = remember(uiState.currencyQuery, uiState.currencyOptions) {
+        val query = uiState.currencyQuery.trim()
+        if (query.isBlank()) {
+            uiState.currencyOptions
+        } else {
+            uiState.currencyOptions.filter { option ->
+                option.first.contains(query, ignoreCase = true) ||
+                    option.second.contains(query, ignoreCase = true)
+            }
+        }
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
@@ -96,22 +105,29 @@ fun CreateGroupScreen(viewModel: CreateGroupViewModel, onNavigateBack: () -> Uni
                 onExpandedChange = { expanded = !expanded }
             ) {
                 OutlinedTextField(
-                    value = uiState.Currency,
-                    onValueChange = {},
-                    readOnly = true,
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)},
-                    modifier = Modifier.fillMaxWidth().menuAnchor(type = ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+                    value = uiState.currencyQuery,
+                    onValueChange = {
+                        viewModel.onCurrencyInputChanged(it)
+                        expanded = true
+                    },
+                    readOnly = false,
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .menuAnchor(type = ExposedDropdownMenuAnchorType.PrimaryEditable),
+                    placeholder = { Text("Select currency") },
                     shape = RoundedCornerShape(8.dp)
                 )
+
                 ExposedDropdownMenu(
                     expanded = expanded,
                     onDismissRequest = { expanded = false }
                 ) {
-                    currencies.forEach { selectionOption ->
+                    filteredCurrencyOptions.forEach { option ->
                         DropdownMenuItem(
-                            text = { Text(selectionOption)},
+                            text = { Text(option.second) },
                             onClick = {
-                                viewModel.onCurrencyChanged(selectionOption)
+                                viewModel.onCurrencyChanged(option.first)
                                 expanded = false
                             }
                         )
