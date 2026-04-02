@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.Currency
+import java.util.Locale
 
 class CreateGroupViewModel (
     private val requestCreateGroupUseCase: RequestCreateGroupUseCase
@@ -19,12 +21,55 @@ class CreateGroupViewModel (
     // The public state the UI reads (read-only)
     val uiState: StateFlow<CreateGroupUiState> = _uiState.asStateFlow()
 
+    init {
+        val options = buildCurrencyOptions()
+        val defaultCurrency = "EUR"
+        val defaultLabel = options.firstOrNull { it.first == defaultCurrency }?.second ?: defaultCurrency
+        _uiState.update {
+            it.copy(
+                selectedCurrencyCode = defaultCurrency,
+                currencyQuery = defaultLabel,
+                isCurrencySelectedFromDropdown = true,
+                currencyOptions = options
+            )
+        }
+    }
+
     fun onNameChanged(newName: String) {
         _uiState.update { it.copy(Name = newName, errorMessage = null) }
     }
 
     fun onCurrencyChanged(newCurrency: String) {
-        _uiState.update { it.copy(Currency = newCurrency, errorMessage = null) }
+        val allowedCurrencies = _uiState.value.currencyOptions.map { it.first }.toSet()
+        if (newCurrency !in allowedCurrencies) {
+            _uiState.update { it.copy(errorMessage = "Please select a currency from the list.") }
+            return
+        }
+
+        val label = _uiState.value.currencyOptions
+            .firstOrNull { it.first == newCurrency }
+            ?.second
+            ?: newCurrency
+
+        _uiState.update {
+            it.copy(
+                selectedCurrencyCode = newCurrency,
+                currencyQuery = label,
+                isCurrencySelectedFromDropdown = true,
+                errorMessage = null
+            )
+        }
+    }
+
+    fun onCurrencyInputChanged(input: String) {
+        _uiState.update {
+            it.copy(
+                currencyQuery = input,
+                selectedCurrencyCode = "",
+                isCurrencySelectedFromDropdown = false,
+                errorMessage = null
+            )
+        }
     }
 
     fun createGroup(onSuccess: () -> Unit) {
@@ -34,10 +79,16 @@ class CreateGroupViewModel (
             return
         }
 
+        val allowedCurrencies = state.currencyOptions.map { it.first }.toSet()
+        if (state.selectedCurrencyCode !in allowedCurrencies) {
+            _uiState.update { it.copy(errorMessage = "Please select a currency from the list.") }
+            return
+        }
+
         _uiState.update { it.copy(isLoading = true, errorMessage = null) }
 
         viewModelScope.launch {
-            val result = requestCreateGroupUseCase.execute(state.Name, state.Currency)
+            val result = requestCreateGroupUseCase.execute(state.Name, state.selectedCurrencyCode)
             if (result.isSuccess) {
                 _uiState.update { it.copy(isLoading = false) }
                 onSuccess()
@@ -50,5 +101,21 @@ class CreateGroupViewModel (
                 }
             }
         }
+    }
+
+    private fun buildCurrencyOptions(): List<Pair<String, String>> {
+        return Currency.getAvailableCurrencies()
+            .asSequence()
+            .map { it.currencyCode }
+            .distinct()
+            .sorted()
+            .map { code ->
+                val name = runCatching {
+                    Currency.getInstance(code).getDisplayName(Locale.getDefault())
+                }.getOrDefault(code)
+
+                code to "$code - $name"
+            }
+            .toList()
     }
 }
