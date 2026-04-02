@@ -29,6 +29,19 @@ Run:
 
 If both commands pass, Firebase is configured correctly on your machine.
 
+### Deploy commands (Firebase)
+
+```bash
+# Authenticate once
+firebase login
+
+# Optional: select project alias used by this repo
+firebase use <firebase-project-id>
+
+# Deploy Firestore rules from firestore.rules
+firebase deploy --only firestore:rules
+```
+
 ## Supabase receipt upload
 
 Receipt image upload goes through a Supabase Edge Function.
@@ -51,6 +64,23 @@ SUPABASE_UPLOAD_URL=https://<project-ref>.functions.supabase.co
 
 ```json
 { "receiptUrl": "https://..." }
+```
+
+### Deploy commands (Supabase)
+
+```bash
+# Authenticate once
+supabase login
+
+# Link local folder to your Supabase project
+supabase link --project-ref <project-ref>
+
+# Set/update Edge Function secrets
+supabase secrets set APP_SUPABASE_URL=https://<project-ref>.supabase.co
+supabase secrets set APP_SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
+
+# Deploy receipt upload function
+supabase functions deploy <function-name>
 ```
 
 ## Netlify App Link Hosting
