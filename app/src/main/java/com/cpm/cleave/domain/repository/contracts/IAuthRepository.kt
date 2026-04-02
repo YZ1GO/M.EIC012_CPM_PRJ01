@@ -25,4 +25,6 @@ interface IAuthRepository {
     ): Result<User>
     suspend fun signOut(): Result<Unit>
 
+    suspend fun sendPasswordResetEmail(email: String): Result<Unit>
+
 }
