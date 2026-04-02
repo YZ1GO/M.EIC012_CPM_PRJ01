@@ -6,6 +6,7 @@ import com.cpm.cleave.domain.repository.contracts.IAuthRepository
 import com.cpm.cleave.domain.repository.contracts.IScannerRepository
 import com.cpm.cleave.domain.usecase.GetAddExpenseMembersUseCase
 import com.cpm.cleave.domain.usecase.RequestCreateExpenseUseCase
+import com.cpm.cleave.model.ReceiptItem
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -95,6 +96,7 @@ class AddExpenseViewModel(
         _uiState.update {
             it.copy(
                 hasReceiptImage = imageBytes != null,
+                detectedReceiptItems = emptyList(),
                 receiptMessage = if (imageBytes != null) "Receipt attached" else null,
                 errorMessage = null
             )
@@ -137,6 +139,97 @@ class AddExpenseViewModel(
                         )
                     }
                 }
+        }
+    }
+
+    fun extractItemsFromReceipt() {
+        val imageBytes = receiptImageBytes
+        if (imageBytes == null) {
+            _uiState.update { it.copy(errorMessage = "Capture a receipt image first") }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isExtractingItems = true, receiptMessage = null, errorMessage = null) }
+            scannerRepository.extractReceiptItems(imageBytes)
+                .onSuccess { items ->
+                    _uiState.update {
+                        it.copy(
+                            isExtractingItems = false,
+                            detectedReceiptItems = items,
+                            receiptMessage = if (items.isNotEmpty()) {
+                                "Detected ${items.size} line items"
+                            } else {
+                                "No item lines detected. You can still add them manually."
+                            }
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            isExtractingItems = false,
+                            errorMessage = error.message ?: "Could not read receipt items"
+                        )
+                    }
+                }
+        }
+    }
+
+    fun onReceiptItemNameChanged(index: Int, value: String) {
+        _uiState.update { current ->
+            if (index !in current.detectedReceiptItems.indices) return@update current
+            val updated = current.detectedReceiptItems.toMutableList()
+            updated[index] = updated[index].copy(name = value)
+            current.copy(detectedReceiptItems = updated)
+        }
+    }
+
+    fun onReceiptItemAmountChanged(index: Int, value: String) {
+        _uiState.update { current ->
+            if (index !in current.detectedReceiptItems.indices) return@update current
+            val updated = current.detectedReceiptItems.toMutableList()
+            val parsed = value.toDoubleOrNull() ?: 0.0
+            updated[index] = updated[index].copy(amount = parsed)
+            current.copy(detectedReceiptItems = updated)
+        }
+    }
+
+    fun onReceiptItemQuantityChanged(index: Int, value: String) {
+        _uiState.update { current ->
+            if (index !in current.detectedReceiptItems.indices) return@update current
+            val updated = current.detectedReceiptItems.toMutableList()
+            val parsed = value.toDoubleOrNull()
+            updated[index] = updated[index].copy(quantity = parsed?.takeIf { it > 0.0 } ?: 1.0)
+            current.copy(detectedReceiptItems = updated)
+        }
+    }
+
+    fun addReceiptItem() {
+        _uiState.update { current ->
+            current.copy(
+                detectedReceiptItems = current.detectedReceiptItems + ReceiptItem(name = "", amount = 0.0, quantity = 1.0, unitPrice = null)
+            )
+        }
+    }
+
+    fun removeReceiptItem(index: Int) {
+        _uiState.update { current ->
+            if (index !in current.detectedReceiptItems.indices) return@update current
+            val updated = current.detectedReceiptItems.toMutableList().apply { removeAt(index) }
+            current.copy(detectedReceiptItems = updated)
+        }
+    }
+
+    fun fillDescriptionFromReceiptItems() {
+        _uiState.update { current ->
+            val names = current.detectedReceiptItems
+                .map { it.name.trim() }
+                .filter { it.isNotBlank() }
+            if (names.isEmpty()) return@update current
+
+            val merged = names.joinToString(separator = ", ").take(120)
+            current.copy(description = merged)
         }
     }
 
@@ -310,7 +403,18 @@ class AddExpenseViewModel(
                 description = state.description,
                 splitMemberIds = splitMemberIds,
                 payerContributions = payerContributions,
-                receiptImageBytes = receiptImageBytes
+                receiptImageBytes = receiptImageBytes,
+                receiptItems = state.detectedReceiptItems
+                    .mapNotNull { item ->
+                        val name = item.name.trim()
+                        if (name.isBlank() || item.amount <= 0.0) null
+                        else ReceiptItem(
+                            name = name,
+                            amount = item.amount,
+                            quantity = item.quantity?.takeIf { it > 0.0 } ?: 1.0,
+                            unitPrice = item.unitPrice
+                        )
+                    }
             ).onSuccess {
                 _uiState.update { it.copy(isLoading = false) }
                 onSuccess()

@@ -14,6 +14,7 @@ import com.cpm.cleave.model.Expense
 import com.cpm.cleave.model.PayerContribution
 import com.cpm.cleave.model.ExpenseShare
 import com.cpm.cleave.model.Group
+import com.cpm.cleave.model.ReceiptItem
 import com.google.android.gms.tasks.Task
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -632,6 +633,7 @@ class GroupRepositoryImpl(
                 groupId = expenseDoc.getString("groupId") ?: groupId,
                 paidByUserId = legacyPaidBy,
                 imagePath = expenseDoc.getString("imagePath"),
+                receiptItems = decodeReceiptItemsField(expenseDoc.get("receiptItems")),
                 payerContributions = if (payerContributions.isNotEmpty()) {
                     payerContributions
                 } else {
@@ -726,6 +728,19 @@ class GroupRepositoryImpl(
                     continuation.cancel(exception)
                 }
             }
+        }
+    }
+
+    private fun decodeReceiptItemsField(raw: Any?): List<ReceiptItem> {
+        val entries = raw as? List<*> ?: return emptyList()
+        return entries.mapNotNull { entry ->
+            val map = entry as? Map<*, *> ?: return@mapNotNull null
+            val name = (map["name"] as? String)?.trim().orEmpty()
+            val amount = (map["amount"] as? Number)?.toDouble() ?: 0.0
+            val quantity = (map["quantity"] as? Number)?.toDouble()?.takeIf { it > 0.0 }
+            val unitPrice = (map["unitPrice"] as? Number)?.toDouble()?.takeIf { it > 0.0 }
+            if (name.isBlank() || amount <= 0.0) null
+            else ReceiptItem(name = name, amount = amount, quantity = quantity, unitPrice = unitPrice)
         }
     }
 

@@ -23,10 +23,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -166,13 +168,116 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
-                Button(
-                    onClick = { viewModel.extractTotalFromReceipt() },
-                    enabled = !uiState.isExtractingTotal,
-                    colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primary),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text(if (uiState.isExtractingTotal) "Reading receipt..." else "Extract total from receipt")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { viewModel.extractTotalFromReceipt() },
+                        enabled = !uiState.isExtractingTotal,
+                        colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primary),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(if (uiState.isExtractingTotal) "Reading total..." else "Extract total")
+                    }
+
+                    Button(
+                        onClick = { viewModel.extractItemsFromReceipt() },
+                        enabled = !uiState.isExtractingItems,
+                        colors = ButtonDefaults.buttonColors(containerColor = colorScheme.secondary),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(if (uiState.isExtractingItems) "Reading items..." else "Extract items")
+                    }
+                }
+
+                if (uiState.detectedReceiptItems.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text("Receipt items", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    uiState.detectedReceiptItems.forEachIndexed { index, item ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            TextField(
+                                value = String.format(java.util.Locale.US, "%.3f", (item.quantity ?: 1.0)).trimEnd('0').trimEnd('.'),
+                                onValueChange = { value -> viewModel.onReceiptItemQuantityChanged(index, value) },
+                                placeholder = { Text("Qty") },
+                                modifier = Modifier.weight(0.55f),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
+                                    unfocusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
+                                    disabledContainerColor = colorScheme.surface.copy(alpha = 0.35f),
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent,
+                                    disabledIndicatorColor = Color.Transparent
+                                ),
+                                singleLine = true
+                            )
+                            TextField(
+                                value = item.name,
+                                onValueChange = { value -> viewModel.onReceiptItemNameChanged(index, value) },
+                                placeholder = { Text("Item") },
+                                modifier = Modifier.weight(1.1f),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
+                                    unfocusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
+                                    disabledContainerColor = colorScheme.surface.copy(alpha = 0.35f),
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent,
+                                    disabledIndicatorColor = Color.Transparent
+                                ),
+                                singleLine = true
+                            )
+                            TextField(
+                                value = if (item.amount == 0.0) "" else String.format(java.util.Locale.US, "%.2f", item.amount),
+                                onValueChange = { value -> viewModel.onReceiptItemAmountChanged(index, value) },
+                                placeholder = { Text("Subtotal") },
+                                modifier = Modifier.weight(0.75f),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
+                                    unfocusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
+                                    disabledContainerColor = colorScheme.surface.copy(alpha = 0.35f),
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent,
+                                    disabledIndicatorColor = Color.Transparent
+                                ),
+                                singleLine = true
+                            )
+                            IconButton(onClick = { viewModel.removeReceiptItem(index) }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Remove item")
+                            }
+                        }
+                        if (index < uiState.detectedReceiptItems.lastIndex) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { viewModel.addReceiptItem() },
+                        colors = ButtonDefaults.buttonColors(containerColor = colorScheme.secondaryContainer),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Add item")
+                    }
+                    Button(
+                        onClick = { viewModel.fillDescriptionFromReceiptItems() },
+                        enabled = uiState.detectedReceiptItems.isNotEmpty(),
+                        colors = ButtonDefaults.buttonColors(containerColor = colorScheme.tertiaryContainer),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Use in description")
+                    }
                 }
             }
 

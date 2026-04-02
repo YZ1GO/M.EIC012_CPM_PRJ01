@@ -68,6 +68,11 @@ class AuthRepositoryImpl(
                 return Result.success(local.name)
             }
 
+            val currentUid = firebaseAuth.currentUser?.uid
+            if (currentUid == null || currentUid != userId) {
+                return Result.success(null)
+            }
+
             val remoteName = runCatching {
                 firestore.collection("users")
                     .document(userId)
@@ -308,6 +313,14 @@ override suspend fun signUpWithEmail(
                         "groupId" to expense.groupId,
                         "paidByUserId" to expense.paidByUserId,
                         "imagePath" to expense.imagePath,
+                        "receiptItems" to expense.receiptItems.map { item ->
+                            mapOf(
+                                "name" to item.name,
+                                "amount" to item.amount,
+                                "quantity" to item.quantity,
+                                "unitPrice" to item.unitPrice
+                            )
+                        },
                         "updatedAt" to now
                     ),
                     SetOptions.merge()

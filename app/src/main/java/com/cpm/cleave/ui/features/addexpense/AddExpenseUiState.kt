@@ -1,5 +1,7 @@
 package com.cpm.cleave.ui.features.addexpense
 
+import com.cpm.cleave.model.ReceiptItem
+
 enum class SplitMode {
     ALL_MEMBERS,
     SELECTED_MEMBERS
@@ -23,6 +25,8 @@ data class AddExpenseUiState(
     val selectedSplitMemberIds: Set<String> = emptySet(),
     val hasReceiptImage: Boolean = false,
     val isExtractingTotal: Boolean = false,
+    val isExtractingItems: Boolean = false,
+    val detectedReceiptItems: List<ReceiptItem> = emptyList(),
     val receiptMessage: String? = null,
     val isLoading: Boolean = false,
     val errorMessage: String? = null

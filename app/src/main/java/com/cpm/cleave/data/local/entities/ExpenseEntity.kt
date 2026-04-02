@@ -34,5 +34,6 @@ data class ExpenseEntity(
     val date: Long,
     val groupId: String,
     val paidBy: String,
-    val imagePath: String? = null
+    val imagePath: String? = null,
+    val receiptItemsJson: String? = null
 )

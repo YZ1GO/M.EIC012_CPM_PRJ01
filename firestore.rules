@@ -49,6 +49,7 @@ service cloud.firestore {
                     'groupId',
                     'paidByUserId',
                     'imagePath',
+                    'receiptItems',
                     'updatedAt'
                 ]) &&
                 request.resource.data.amount is number &&
@@ -59,6 +60,8 @@ service cloud.firestore {
                 request.resource.data.updatedAt is int &&
                 request.resource.data.description is string &&
                 request.resource.data.description.size() <= 200 &&
+                request.resource.data.receiptItems is list &&
+                request.resource.data.receiptItems.size() <= 50 &&
                 (!isAnonymousAuth() || request.resource.data.amount <= 200);
         }
 

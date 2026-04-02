@@ -533,6 +533,32 @@ private fun ExpenseDetailsItem(
         Spacer(modifier = Modifier.height(4.dp))
         Text(text = dateText, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
 
+        if (expense.receiptItems.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Receipt items",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            expense.receiptItems.take(4).forEach { item ->
+                val qtyPrefix = String.format(Locale.US, "%.3f", (item.quantity ?: 1.0)).trimEnd('0').trimEnd('.') + " x "
+                Text(
+                    text = "• $qtyPrefix${item.name} - ${String.format(Locale.US, "%.2f", item.amount)}",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (expense.receiptItems.size > 4) {
+                Text(
+                    text = "+${expense.receiptItems.size - 4} more",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
         val receiptUrl = expense.imagePath?.takeIf { it.isNotBlank() }
         if (receiptUrl != null) {
             Spacer(modifier = Modifier.height(6.dp))

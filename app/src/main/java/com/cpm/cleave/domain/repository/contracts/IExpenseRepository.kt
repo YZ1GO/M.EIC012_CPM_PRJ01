@@ -3,6 +3,7 @@ package com.cpm.cleave.domain.repository.contracts
 import com.cpm.cleave.model.Expense
 import com.cpm.cleave.model.Debt
 import com.cpm.cleave.model.ExpenseShare
+import com.cpm.cleave.model.ReceiptItem
 import kotlinx.coroutines.flow.Flow
 
 interface IExpenseRepository {
@@ -16,6 +17,7 @@ interface IExpenseRepository {
         description: String,
         splitMemberIds: List<String>,
         payerContributions: Map<String, Double>,
-        receiptImageBytes: ByteArray? = null
+        receiptImageBytes: ByteArray? = null,
+        receiptItems: List<ReceiptItem> = emptyList()
     ): Result<Unit>
 }

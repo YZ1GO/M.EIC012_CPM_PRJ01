@@ -8,5 +8,6 @@ data class Expense(
     val groupId: String,
     val paidByUserId: String,
     val imagePath: String? = null,
-    val payerContributions: List<PayerContribution> = emptyList()
+    val payerContributions: List<PayerContribution> = emptyList(),
+    val receiptItems: List<ReceiptItem> = emptyList()
 )

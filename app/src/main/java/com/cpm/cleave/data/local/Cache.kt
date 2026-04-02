@@ -12,6 +12,9 @@ import com.cpm.cleave.model.Expense
 import com.cpm.cleave.model.PayerContribution
 import com.cpm.cleave.model.ExpenseShare
 import com.cpm.cleave.model.Group
+import com.cpm.cleave.model.ReceiptItem
+import org.json.JSONArray
+import org.json.JSONObject
 
 class Cache(context: Context) {
     private val database = CleaveDatabase.getDatabase(context)
@@ -136,7 +139,8 @@ class Cache(context: Context) {
         groupId: String,
         payerContributions: Map<String, Double>,
         memberIds: List<String>,
-        imagePath: String? = null
+        imagePath: String? = null,
+        receiptItems: List<ReceiptItem> = emptyList()
     ) {
         database.withTransaction {
             if (payerContributions.isEmpty()) return@withTransaction
@@ -149,7 +153,8 @@ class Cache(context: Context) {
                 date = date,
                 groupId = groupId,
                 paidBy = primaryPayer,
-                imagePath = imagePath
+                imagePath = imagePath,
+                receiptItemsJson = encodeReceiptItems(receiptItems)
             )
             expenseDao.insertExpense(expense)
             expensePayerDao.deletePayersForExpense(expenseId)
@@ -192,6 +197,7 @@ class Cache(context: Context) {
                 groupId = entity.groupId,
                 paidByUserId = entity.paidBy,
                 imagePath = entity.imagePath,
+                receiptItems = decodeReceiptItems(entity.receiptItemsJson),
                 payerContributions = if (payers.isNotEmpty()) {
                     payers.map { payer -> PayerContribution(userId = payer.userId, amount = payer.amount) }
                 } else {
@@ -222,7 +228,8 @@ class Cache(context: Context) {
                         date = expense.date,
                         groupId = expense.groupId,
                         paidBy = primaryPayer,
-                        imagePath = expense.imagePath
+                        imagePath = expense.imagePath,
+                        receiptItemsJson = encodeReceiptItems(expense.receiptItems)
                     )
                 )
                 expensePayerDao.deletePayersForExpense(expense.id)
@@ -287,6 +294,7 @@ class Cache(context: Context) {
             groupId = entity.groupId,
             paidByUserId = entity.paidBy,
             imagePath = entity.imagePath,
+            receiptItems = decodeReceiptItems(entity.receiptItemsJson),
             payerContributions = if (payers.isNotEmpty()) {
                 payers.map { payer -> PayerContribution(userId = payer.userId, amount = payer.amount) }
             } else {
@@ -331,6 +339,50 @@ class Cache(context: Context) {
                 lastSeen = System.currentTimeMillis()
             )
         )
+    }
+
+    private fun encodeReceiptItems(items: List<ReceiptItem>): String? {
+        if (items.isEmpty()) return null
+        return JSONArray().apply {
+            items.forEach { item ->
+                put(
+                    JSONObject().apply {
+                        put("name", item.name)
+                        put("amount", item.amount)
+                        if (item.quantity != null) put("quantity", item.quantity)
+                        if (item.unitPrice != null) put("unitPrice", item.unitPrice)
+                    }
+                )
+            }
+        }.toString()
+    }
+
+    private fun decodeReceiptItems(raw: String?): List<ReceiptItem> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching {
+            val array = JSONArray(raw)
+            buildList {
+                for (index in 0 until array.length()) {
+                    val entry = array.optJSONObject(index) ?: continue
+                    val name = entry.optString("name").trim()
+                    val amount = entry.optDouble("amount", 0.0)
+                    val quantity = entry.optDouble("quantity", Double.NaN)
+                        .takeUnless { it.isNaN() || it <= 0.0 }
+                    val unitPrice = entry.optDouble("unitPrice", Double.NaN)
+                        .takeUnless { it.isNaN() || it <= 0.0 }
+                    if (name.isNotBlank() && amount > 0.0) {
+                        add(
+                            ReceiptItem(
+                                name = name,
+                                amount = amount,
+                                quantity = quantity,
+                                unitPrice = unitPrice
+                            )
+                        )
+                    }
+                }
+            }
+        }.getOrDefault(emptyList())
     }
 
     // Completely clears the Room database.

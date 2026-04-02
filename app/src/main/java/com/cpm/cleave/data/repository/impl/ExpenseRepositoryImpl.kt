@@ -15,6 +15,7 @@ import com.cpm.cleave.model.Debt
 import com.cpm.cleave.model.Expense
 import com.cpm.cleave.model.ExpenseShare
 import com.cpm.cleave.model.PayerContribution
+import com.cpm.cleave.model.ReceiptItem
 import com.google.android.gms.tasks.Task
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -229,7 +230,8 @@ class ExpenseRepositoryImpl(
         description: String,
         splitMemberIds: List<String>,
         payerContributions: Map<String, Double>,
-        receiptImageBytes: ByteArray?
+        receiptImageBytes: ByteArray?,
+        receiptItems: List<ReceiptItem>
     ): Result<Unit> {
         return try {
             val currentUser = authSessionStore.getActiveUser()
@@ -281,7 +283,8 @@ class ExpenseRepositoryImpl(
                 groupId = groupId,
                 payerContributions = normalizedContributions,
                 memberIds = splitMemberIds,
-                imagePath = receiptImagePath
+                imagePath = receiptImagePath,
+                receiptItems = receiptItems
             )
 
             localExpenseRefreshEvents.tryEmit(groupId)
@@ -301,7 +304,8 @@ class ExpenseRepositoryImpl(
                         date = now,
                         splitMemberIds = splitMemberIds,
                         payerContributions = normalizedContributions,
-                        imagePath = receiptImagePath.takeUnless { it.isLocalReceiptPath() }
+                        imagePath = receiptImagePath.takeUnless { it.isLocalReceiptPath() },
+                        receiptItems = receiptItems
                     )
                     true
                 } ?: false
@@ -348,7 +352,8 @@ class ExpenseRepositoryImpl(
                         date = localExpense.date,
                         splitMemberIds = shares.map { it.userId },
                         payerContributions = payers.associate { it.userId to it.amount },
-                        imagePath = syncedImagePath
+                        imagePath = syncedImagePath,
+                        receiptItems = localExpense.receiptItems
                     )
                     true
                 } ?: false
@@ -396,6 +401,7 @@ class ExpenseRepositoryImpl(
                 groupId = expenseDoc.getString("groupId") ?: groupId,
                 paidByUserId = legacyPaidBy,
                 imagePath = expenseDoc.getString("imagePath"),
+                receiptItems = decodeReceiptItemsField(expenseDoc.get("receiptItems")),
                 payerContributions = if (payerContributions.isNotEmpty()) {
                     payerContributions
                 } else {
@@ -431,7 +437,8 @@ class ExpenseRepositoryImpl(
         date: Long,
         splitMemberIds: List<String>,
         payerContributions: Map<String, Double>,
-        imagePath: String?
+        imagePath: String?,
+        receiptItems: List<ReceiptItem>
     ) {
         val now = System.currentTimeMillis()
         val groupRef = firestore.collection("groups").document(groupId)
@@ -448,6 +455,14 @@ class ExpenseRepositoryImpl(
                 "groupId" to groupId,
                 "paidByUserId" to primaryPayerId,
                 "imagePath" to imagePath,
+                "receiptItems" to receiptItems.map { item ->
+                    mapOf(
+                        "name" to item.name,
+                        "amount" to item.amount,
+                        "quantity" to item.quantity,
+                        "unitPrice" to item.unitPrice
+                    )
+                },
                 "updatedAt" to now
             ),
             SetOptions.merge()
@@ -603,6 +618,19 @@ class ExpenseRepositoryImpl(
 
     private fun String?.isLocalReceiptPath(): Boolean {
         return this?.startsWith("file://") == true
+    }
+
+    private fun decodeReceiptItemsField(raw: Any?): List<ReceiptItem> {
+        val entries = raw as? List<*> ?: return emptyList()
+        return entries.mapNotNull { entry ->
+            val map = entry as? Map<*, *> ?: return@mapNotNull null
+            val name = (map["name"] as? String)?.trim().orEmpty()
+            val amount = (map["amount"] as? Number)?.toDouble() ?: 0.0
+            val quantity = (map["quantity"] as? Number)?.toDouble()?.takeIf { it > 0.0 }
+            val unitPrice = (map["unitPrice"] as? Number)?.toDouble()?.takeIf { it > 0.0 }
+            if (name.isBlank() || amount <= 0.0) null
+            else ReceiptItem(name = name, amount = amount, quantity = quantity, unitPrice = unitPrice)
+        }
     }
 
     private suspend fun <T> Task<T>.awaitTaskResult(): T {
