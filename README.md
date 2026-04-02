@@ -38,8 +38,8 @@ firebase login
 # Optional: select project alias used by this repo
 firebase use <firebase-project-id>
 
-# Deploy Firestore rules from firestore.rules
-firebase deploy --only firestore:rules
+# Deploy Firestore rules and indexes
+firebase deploy --only firestore
 ```
 
 ## Supabase receipt upload
