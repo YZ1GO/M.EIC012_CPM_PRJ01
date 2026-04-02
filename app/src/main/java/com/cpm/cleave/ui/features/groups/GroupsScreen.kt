@@ -236,7 +236,12 @@ fun GroupDetailsScreen(
 
         Text(currentGroup.name, fontSize = 28.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             HeaderChip(label = currentGroup.currency)
             HeaderChip(
                 label = "Code ${currentGroup.joinCode}",

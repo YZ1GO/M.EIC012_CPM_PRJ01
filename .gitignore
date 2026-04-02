@@ -14,6 +14,7 @@
 .cxx
 local.properties
 .idea/
+.vscode/
 
 *.log
 supabase/.temp/
