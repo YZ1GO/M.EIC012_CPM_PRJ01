@@ -608,14 +608,18 @@ class GroupRepositoryImpl(
         userId: String,
         knownLocalGroupIds: List<String> = emptyList()
     ): List<Group> {
-        val membershipSnapshot = firestore.collectionGroup("members")
-            .whereEqualTo("userId", userId)
-            .get()
-            .awaitTaskResult()
+        val discoveredGroupIds = mutableSetOf<String>()
 
-        val discoveredGroupIds = membershipSnapshot.documents
-            .mapNotNull { document -> document.reference.parent.parent?.id }
-            .toMutableSet()
+        // Membership discovery by userId field.
+        runCatching {
+            val membershipSnapshot = firestore.collectionGroup("members")
+                .whereEqualTo("userId", userId)
+                .get()
+                .awaitTaskResult()
+            val idsFromMembership = membershipSnapshot.documents
+                .mapNotNull { document -> document.reference.parent.parent?.id }
+            discoveredGroupIds.addAll(idsFromMembership)
+        }
 
         // Reconcile known local groups via direct membership doc checks.
         knownLocalGroupIds.forEach { groupId ->
@@ -641,7 +645,11 @@ class GroupRepositoryImpl(
                 .awaitTaskResult()
 
             val members = membersSnapshot.documents
-                .mapNotNull { member -> member.getString("userId") }
+                .mapNotNull { member ->
+                    member.getString("userId")
+                        ?.takeIf { it.isNotBlank() }
+                        ?: member.id.takeIf { it.isNotBlank() }
+                }
                 .distinct()
 
             Group(
@@ -671,7 +679,11 @@ class GroupRepositoryImpl(
             .awaitTaskResult()
 
         val members = membersSnapshot.documents
-            .mapNotNull { member -> member.getString("userId") }
+            .mapNotNull { member ->
+                member.getString("userId")
+                    ?.takeIf { it.isNotBlank() }
+                    ?: member.id.takeIf { it.isNotBlank() }
+            }
             .distinct()
 
         return Group(

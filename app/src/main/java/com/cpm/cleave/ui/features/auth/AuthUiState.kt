@@ -8,5 +8,6 @@ data class AuthUiState(
     val mergeGuestDataOnSignIn: Boolean = false,
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
-    val isAuthenticated: Boolean = false
+    val isAuthenticated: Boolean = false,
+    val resetPasswordMessage: String? = null
 )

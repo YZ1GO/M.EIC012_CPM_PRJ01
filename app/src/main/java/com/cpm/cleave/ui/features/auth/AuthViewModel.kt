@@ -182,4 +182,34 @@ class AuthViewModel(
                 }
         }
     }
+
+    fun sendPasswordResetEmail() {
+        val email = _uiState.value.email.trim()
+        if (email.isBlank()) {
+            _uiState.update { it.copy(errorMessage = "Please enter your email first") }
+            return
+        }
+
+        _uiState.update { it.copy(isLoading = true, errorMessage = null, resetPasswordMessage = null) }
+
+        viewModelScope.launch {
+            authRepository.sendPasswordResetEmail(email)
+                .onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            resetPasswordMessage = "Password reset email sent. Check your email."
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = error.localizedMessage ?: "Could not send reset email"
+                        )
+                    }
+                }
+        }
+    }
 }
