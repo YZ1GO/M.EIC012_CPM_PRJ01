@@ -9,5 +9,6 @@ data class GroupEntity(
     val id: String,
     val name: String,
     val currency: String,
-    val joinCode: String
+    val joinCode: String,
+    val imageUrl: String? = null
 )

@@ -35,7 +35,7 @@ import com.cpm.cleave.data.local.entities.UserEntity
         DebtEntity::class,
         PaymentEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class CleaveDatabase : RoomDatabase() {
@@ -65,7 +65,7 @@ abstract class CleaveDatabase : RoomDatabase() {
                     builder.fallbackToDestructiveMigration(dropAllTables = true)
                 }
 
-                builder.addMigrations(MIGRATION_2_3, MIGRATION_3_4)
+                builder.addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
 
                 val instance = builder.build()
                 INSTANCE = instance
@@ -84,6 +84,28 @@ abstract class CleaveDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE users ADD COLUMN isSessionActive INTEGER NOT NULL DEFAULT 0")
                 // Preserve previous semantics where non-deleted users were treated as active.
                 db.execSQL("UPDATE users SET isSessionActive = CASE WHEN isDeleted = 0 THEN 1 ELSE 0 END")
+            }
+        }
+
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                val hasImageUrlColumn = db.query("PRAGMA table_info(groups)").use { cursor ->
+                    val nameIndex = cursor.getColumnIndex("name")
+                    var found = false
+
+                    while (nameIndex >= 0 && cursor.moveToNext()) {
+                        if (cursor.getString(nameIndex) == "imageUrl") {
+                            found = true
+                            break
+                        }
+                    }
+
+                    found
+                }
+
+                if (!hasImageUrlColumn) {
+                    db.execSQL("ALTER TABLE groups ADD COLUMN imageUrl TEXT")
+                }
             }
         }
     }

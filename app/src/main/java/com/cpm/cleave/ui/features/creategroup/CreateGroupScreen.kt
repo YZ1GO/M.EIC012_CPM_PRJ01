@@ -1,5 +1,8 @@
 package com.cpm.cleave.ui.features.creategroup
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,19 +32,37 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 
 // ExposedDropdownMenuBox is experimental yet
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreateGroupScreen(viewModel: CreateGroupViewModel, onNavigateBack: () -> Unit) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
 
     var expanded by remember { mutableStateOf(false) }
+    val pickImageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri == null) {
+            viewModel.onGroupImageSelected(null, null)
+            return@rememberLauncherForActivityResult
+        }
+        val bytes = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        }.getOrNull()
+        viewModel.onGroupImageSelected(uri.toString(), bytes)
+    }
+
     val filteredCurrencyOptions = remember(uiState.currencyQuery, uiState.currencyOptions) {
         val query = uiState.currencyQuery.trim()
         if (query.isBlank()) {
@@ -68,6 +89,34 @@ fun CreateGroupScreen(viewModel: CreateGroupViewModel, onNavigateBack: () -> Uni
         )
 
         Spacer(modifier = Modifier.height(48.dp))
+
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text("Group image (optional)", fontSize = 14.sp)
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Button(
+                onClick = { pickImageLauncher.launch("image/*") },
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(if (uiState.selectedImageUri == null) "Choose image" else "Change image")
+            }
+
+            val imageModel = uiState.uploadedImageUrl ?: uiState.selectedImageUri
+            if (!imageModel.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                AsyncImage(
+                    model = imageModel,
+                    contentDescription = "Group image preview",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(96.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
 
         // Name Input Row
         Row(

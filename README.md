@@ -66,6 +66,24 @@ SUPABASE_UPLOAD_URL=https://<project-ref>.functions.supabase.co
 { "receiptUrl": "https://..." }
 ```
 
+## Supabase group image upload
+
+Group image upload uses a dedicated Supabase Edge Function.
+
+1. Deploy the `group-images` function in `supabase/functions/group-images`.
+2. Reuse the same function secrets configured for receipts:
+
+```bash
+supabase secrets set APP_SUPABASE_URL=https://<project-ref>.supabase.co
+supabase secrets set APP_SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
+```
+
+3. The app calls `POST {SUPABASE_UPLOAD_URL}/group-images/upload` and expects:
+
+```json
+{ "imageUrl": "https://..." }
+```
+
 ### Deploy commands (Supabase)
 
 ```bash
@@ -80,7 +98,10 @@ supabase secrets set APP_SUPABASE_URL=https://<project-ref>.supabase.co
 supabase secrets set APP_SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
 
 # Deploy receipt upload function
-supabase functions deploy <function-name>
+supabase functions deploy receipts
+
+# Deploy group image upload function
+supabase functions deploy group-images
 ```
 
 ## Netlify App Link Hosting

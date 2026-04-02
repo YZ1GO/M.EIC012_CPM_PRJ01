@@ -1,5 +1,7 @@
 package com.cpm.cleave.data.repository.impl
 
+import android.util.Base64
+import com.cpm.cleave.BuildConfig
 import com.cpm.cleave.data.local.Cache
 import com.cpm.cleave.data.local.AuthSessionStore
 import com.cpm.cleave.data.local.ConnectivityStatus
@@ -16,6 +18,7 @@ import com.cpm.cleave.model.ExpenseShare
 import com.cpm.cleave.model.Group
 import com.cpm.cleave.model.ReceiptItem
 import com.google.android.gms.tasks.Task
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
@@ -31,7 +34,11 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.Locale
 import kotlin.coroutines.resume
 import kotlinx.coroutines.flow.flatMapLatest
@@ -43,6 +50,7 @@ class GroupRepositoryImpl(
     private val authSessionStore: AuthSessionStore,
     private val pendingSyncStore: PendingSyncStore,
     private val connectivityStatus: ConnectivityStatus,
+    private val firebaseAuth: FirebaseAuth = FirebaseAuth.getInstance(),
     private val anonymousLimits: AnonymousLimits = DEFAULT_ANONYMOUS_LIMITS,
     private val prepareGroupCreationUseCase: PrepareGroupCreationUseCase = PrepareGroupCreationUseCase(),
     private val joinGroupUseCase: JoinGroupUseCase = JoinGroupUseCase(anonymousLimits),
@@ -177,7 +185,7 @@ class GroupRepositoryImpl(
             }
     }
 
-    override suspend fun createGroup(name: String, currency: String): Result<Group> {
+    override suspend fun createGroup(name: String, currency: String, imageUrl: String?): Result<Group> {
         return try {
             if (!connectivityStatus.isNetworkAvailable()) {
                 return Result.failure(
@@ -185,8 +193,11 @@ class GroupRepositoryImpl(
                 )
             }
 
+            val authenticatedUserId = firebaseAuth.currentUser?.uid
+                ?: return Result.failure(IllegalStateException("No authenticated Firebase user found."))
+
             val anonymousUser = authSessionStore.getActiveUser()
-            val command = PrepareGroupCreationCommand(name = name, currency = currency)
+            val command = PrepareGroupCreationCommand(name = name, currency = currency, imageUrl = imageUrl)
             var createdGroup: Group? = null
 
             for (attempt in 1..MAX_JOIN_CODE_ATTEMPTS) {
@@ -198,7 +209,10 @@ class GroupRepositoryImpl(
                     return Result.failure(error)
                 }
 
-                val created = createGroupWithReservedJoinCode(candidate)
+                val created = createGroupWithReservedJoinCode(
+                    group = candidate,
+                    creatorUserId = authenticatedUserId
+                )
                 if (created) {
                     createdGroup = candidate
                     break
@@ -209,7 +223,7 @@ class GroupRepositoryImpl(
                 ?: return Result.failure(IllegalStateException("Could not reserve a unique join code."))
 
             cache.insertGroup(newGroup)
-            anonymousUser?.let { cache.addUserToGroup(newGroup.id, it.id) }
+            cache.addUserToGroup(newGroup.id, authenticatedUserId)
             pendingSyncStore.removePendingGroupSync(newGroup.id)
 
             Result.success(newGroup)
@@ -218,7 +232,61 @@ class GroupRepositoryImpl(
         }
     }
 
-    private suspend fun createGroupWithReservedJoinCode(group: Group): Boolean {
+    override suspend fun uploadGroupImage(imageBytes: ByteArray): Result<String> {
+        return runCatching {
+            val baseUrl = BuildConfig.SUPABASE_UPLOAD_URL.trim().trimEnd('/')
+            if (baseUrl.isBlank()) {
+                throw IllegalStateException("SUPABASE_UPLOAD_URL is not configured")
+            }
+
+            val payload = JSONObject().apply {
+                put("imageBase64", Base64.encodeToString(imageBytes, Base64.NO_WRAP))
+            }
+
+            uploadGroupImageViaHttp(
+                endpointUrl = "$baseUrl/group-images/upload",
+                payload = payload
+            )
+        }
+    }
+
+    private suspend fun uploadGroupImageViaHttp(
+        endpointUrl: String,
+        payload: JSONObject
+    ): String = withContext(Dispatchers.IO) {
+        val connection = (URL(endpointUrl).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 15000
+            readTimeout = 45000
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Accept", "application/json")
+        }
+
+        try {
+            connection.outputStream.use { it.write(payload.toString().toByteArray()) }
+            val status = connection.responseCode
+            val body = runCatching {
+                val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+                stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            }.getOrDefault("")
+
+            if (status !in 200..299) {
+                throw IllegalStateException("Group image upload failed (HTTP $status): $body")
+            }
+
+            val response = JSONObject(body)
+            val imageUrl = response.optString("imageUrl")
+            if (imageUrl.isBlank()) {
+                throw IllegalStateException("Group image upload endpoint did not return imageUrl")
+            }
+            imageUrl
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private suspend fun createGroupWithReservedJoinCode(group: Group, creatorUserId: String): Boolean {
         return try {
             withTimeoutOrNull(3000L) {
                 val now = System.currentTimeMillis()
@@ -235,6 +303,7 @@ class GroupRepositoryImpl(
                         groupRef,
                         mapOf(
                             "name" to group.name,
+                            "imageUrl" to group.imageUrl,
                             "currency" to group.currency,
                             "joinCode" to group.joinCode,
                             "updatedAt" to now
@@ -250,15 +319,13 @@ class GroupRepositoryImpl(
                         )
                     )
 
-                    group.members.forEach { memberId ->
-                        transaction.set(
-                            groupRef.collection("members").document(memberId),
-                            mapOf(
-                                "userId" to memberId,
-                                "updatedAt" to now
-                            )
+                    transaction.set(
+                        groupRef.collection("members").document(creatorUserId),
+                        mapOf(
+                            "userId" to creatorUserId,
+                            "updatedAt" to now
                         )
-                    }
+                    )
                 }.awaitTaskResult()
             } ?: return false
 
@@ -579,6 +646,7 @@ class GroupRepositoryImpl(
             Group(
                 id = groupSnapshot.id,
                 name = groupSnapshot.getString("name") ?: "Untitled group",
+                imageUrl = groupSnapshot.getString("imageUrl"),
                 currency = groupSnapshot.getString("currency") ?: "Euro",
                 members = members,
                 joinCode = groupSnapshot.getString("joinCode") ?: "",
@@ -608,6 +676,7 @@ class GroupRepositoryImpl(
         return Group(
             id = groupSnapshot.id,
             name = groupSnapshot.getString("name") ?: "Untitled group",
+            imageUrl = groupSnapshot.getString("imageUrl"),
             currency = groupSnapshot.getString("currency") ?: "Euro",
             members = members,
             joinCode = groupSnapshot.getString("joinCode") ?: "",
@@ -692,6 +761,7 @@ class GroupRepositoryImpl(
             groupRef,
             mapOf(
                 "name" to group.name,
+                "imageUrl" to group.imageUrl,
                 "currency" to group.currency,
                 "joinCode" to group.joinCode,
                 "updatedAt" to now

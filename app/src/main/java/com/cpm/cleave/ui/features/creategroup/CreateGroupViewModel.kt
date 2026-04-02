@@ -20,6 +20,7 @@ class CreateGroupViewModel (
 
     // The public state the UI reads (read-only)
     val uiState: StateFlow<CreateGroupUiState> = _uiState.asStateFlow()
+    private var selectedImageBytes: ByteArray? = null
 
     init {
         val options = buildCurrencyOptions()
@@ -72,6 +73,17 @@ class CreateGroupViewModel (
         }
     }
 
+    fun onGroupImageSelected(uri: String?, imageBytes: ByteArray?) {
+        selectedImageBytes = imageBytes
+        _uiState.update {
+            it.copy(
+                selectedImageUri = uri,
+                uploadedImageUrl = null,
+                errorMessage = null
+            )
+        }
+    }
+
     fun createGroup(onSuccess: () -> Unit) {
         val state = _uiState.value
         if (state.Name.isBlank()) {
@@ -88,7 +100,29 @@ class CreateGroupViewModel (
         _uiState.update { it.copy(isLoading = true, errorMessage = null) }
 
         viewModelScope.launch {
-            val result = requestCreateGroupUseCase.execute(state.Name, state.selectedCurrencyCode)
+            val uploadedImageUrl = if (state.uploadedImageUrl.isNullOrBlank() && selectedImageBytes != null) {
+                requestCreateGroupUseCase.uploadGroupImage(selectedImageBytes!!)
+                    .onSuccess { url ->
+                        _uiState.update { current -> current.copy(uploadedImageUrl = url) }
+                    }
+                    .getOrElse { error ->
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                errorMessage = error.message ?: "Could not upload group image"
+                            )
+                        }
+                        return@launch
+                    }
+            } else {
+                state.uploadedImageUrl
+            }
+
+            val result = requestCreateGroupUseCase.execute(
+                state.Name,
+                state.selectedCurrencyCode,
+                uploadedImageUrl
+            )
             if (result.isSuccess) {
                 _uiState.update { it.copy(isLoading = false) }
                 onSuccess()

@@ -19,7 +19,7 @@ service cloud.firestore {
 
         // validate top-level group document structure and lengths
         function validGroupPayload() {
-            return request.resource.data.keys().hasOnly(['name', 'currency', 'joinCode', 'updatedAt']) &&
+            return request.resource.data.keys().hasOnly(['name', 'currency', 'joinCode', 'imageUrl', 'updatedAt']) &&
                 request.resource.data.name is string &&
                 request.resource.data.currency is string &&
                 request.resource.data.joinCode is string &&
@@ -29,7 +29,10 @@ service cloud.firestore {
                 request.resource.data.currency.size() > 0 &&
                 request.resource.data.currency.size() <= 20 &&
                 request.resource.data.joinCode.size() >= 6 &&
-                request.resource.data.joinCode.size() <= 12;
+                request.resource.data.joinCode.size() <= 12 &&
+                (!('imageUrl' in request.resource.data) ||
+                    request.resource.data.imageUrl == null ||
+                    (request.resource.data.imageUrl is string && request.resource.data.imageUrl.size() <= 2000));
         }
 
         // validate member document payload (simple userId+timestamp)

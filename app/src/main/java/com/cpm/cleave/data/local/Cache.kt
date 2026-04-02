@@ -31,7 +31,8 @@ class Cache(context: Context) {
                 id = group.id,
                 name = group.name,
                 currency = group.currency,
-                joinCode = group.joinCode
+                joinCode = group.joinCode,
+                imageUrl = group.imageUrl
             )
             groupDao.insertGroup(groupEntity)
         }
@@ -47,6 +48,7 @@ class Cache(context: Context) {
             Group(
                 id = entity.id,
                 name = entity.name,
+                imageUrl = entity.imageUrl,
                 currency = entity.currency,
                 members = members,
                 joinCode = entity.joinCode,
@@ -63,6 +65,7 @@ class Cache(context: Context) {
         return Group(
             id = groupEntity.id,
             name = groupEntity.name,
+            imageUrl = groupEntity.imageUrl,
             currency = groupEntity.currency,
             members = members,
             joinCode = groupEntity.joinCode,
@@ -77,6 +80,7 @@ class Cache(context: Context) {
         return Group(
             id = groupEntity.id,
             name = groupEntity.name,
+            imageUrl = groupEntity.imageUrl,
             currency = groupEntity.currency,
             members = members,
             joinCode = groupEntity.joinCode,
@@ -89,7 +93,8 @@ class Cache(context: Context) {
             id = group.id,
             name = group.name,
             currency = group.currency,
-            joinCode = group.joinCode
+            joinCode = group.joinCode,
+            imageUrl = group.imageUrl
         )
         groupDao.insertGroup(groupEntity)
     }
@@ -106,7 +111,8 @@ class Cache(context: Context) {
                     id = group.id,
                     name = group.name,
                     currency = group.currency,
-                    joinCode = group.joinCode
+                    joinCode = group.joinCode,
+                    imageUrl = group.imageUrl
                 )
             )
 

@@ -8,7 +8,8 @@ import kotlin.random.Random
 
 data class PrepareGroupCreationCommand(
     val name: String,
-    val currency: String
+    val currency: String,
+    val imageUrl: String?
 )
 
 class PrepareGroupCreationUseCase {
@@ -33,6 +34,7 @@ class PrepareGroupCreationUseCase {
             Group(
                 id = UUID.randomUUID().toString(),
                 name = command.name,
+                imageUrl = command.imageUrl,
                 currency = command.currency,
                 members = currentUser?.let { listOf(it.id) } ?: emptyList(),
                 joinCode = joinCode,
