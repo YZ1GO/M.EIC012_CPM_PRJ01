@@ -229,7 +229,8 @@ override suspend fun signUpWithEmail(
         return try {
             firebaseAuth.signOut()
             authSessionStore.clearAllActiveSessionUsers()
-            cache.clearAll()
+            // Keep local cache so a subsequent sign-in can immediately recover user-scoped data
+            // (groups are still filtered by active user membership).
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

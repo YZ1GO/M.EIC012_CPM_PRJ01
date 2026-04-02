@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
@@ -153,8 +154,11 @@ class GroupRepositoryImpl(
                     .whereEqualTo("userId", userId)
                     .addSnapshotListener { _, error ->
                         if (error != null) {
-                            if (error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
-                                membershipRegistration?.remove()
+                            // Do not remove this listener on transient auth/rules races.
+                            // Keeping it alive allows automatic recovery after auth is restored.
+                            scope.launch {
+                                delay(800)
+                                refreshAndEmit()
                             }
                             return@addSnapshotListener
                         }
@@ -303,7 +307,7 @@ class GroupRepositoryImpl(
                         } catch (e: Exception) {
                             if (e is com.google.firebase.firestore.FirebaseFirestoreException && 
                                 e.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
-                                false
+                                null
                             } else {
                                 null
                             }
@@ -319,6 +323,20 @@ class GroupRepositoryImpl(
                 flushPendingGroupSyncs()
 
                 warmExpensesCache(remoteGroups.map { it.id })
+                cache.loadGroups(currentUser.id)
+            }.recoverCatching {
+                // Sign-out/sign-in can briefly race auth + rules propagation and return PERMISSION_DENIED.
+                // Retry once after a short delay before falling back to local cache.
+                delay(900)
+                val retriedRemoteGroups = withTimeoutOrNull(4000L) {
+                    fetchGroupsFromRemote(
+                        userId = currentUser.id,
+                        knownLocalGroupIds = localGroups.map { it.id }
+                    )
+                } ?: throw IllegalStateException("Remote groups fetch timed out")
+
+                retriedRemoteGroups.forEach { cache.upsertGroupWithMembers(it) }
+                warmExpensesCache(retriedRemoteGroups.map { it.id })
                 cache.loadGroups(currentUser.id)
             }
 
@@ -357,10 +375,10 @@ class GroupRepositoryImpl(
                     remoteGroupExists(localGroup.id)
                 }
             } catch (e: Exception) {
-                // If Firestore denies us access, it means we are kicked out or the group is deleted.
+                // Treat permission races as unknown state to avoid destructive local deletions.
                 if (e is com.google.firebase.firestore.FirebaseFirestoreException && 
                     e.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
-                    false 
+                    null
                 } else {
                     null // Actual network failure, preserve local data
                 }
