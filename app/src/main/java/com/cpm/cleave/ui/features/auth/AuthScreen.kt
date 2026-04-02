@@ -95,7 +95,8 @@ fun AuthScreen(
         Text(
             text = if (uiState.isRegisterMode) "Create account" else "Sign in",
             fontSize = 28.sp,
-            fontWeight = FontWeight.SemiBold
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onBackground
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -217,7 +218,8 @@ fun AuthScreen(
                 )
                 Text(
                     text = "Merge current guest data into this account",
-                    modifier = Modifier.padding(top = 12.dp)
+                    modifier = Modifier.padding(top = 12.dp),
+                    color = MaterialTheme.colorScheme.onBackground
                 )
             }
         }
