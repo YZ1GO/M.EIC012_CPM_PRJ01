@@ -34,6 +34,7 @@ class AppContainer(context: Context) {
         connectivityStatus = connectivityStatus
     )
     val expenseRepository = ExpenseRepositoryImpl(
+        appContext = appContext,
         cache = cache,
         authSessionStore = authSessionStore,
         pendingSyncStore = pendingSyncStore,

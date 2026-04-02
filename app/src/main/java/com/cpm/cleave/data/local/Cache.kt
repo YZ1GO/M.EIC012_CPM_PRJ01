@@ -301,6 +301,10 @@ class Cache(context: Context) {
         }
     }
 
+    suspend fun updateExpenseImagePath(expenseId: String, imagePath: String?) {
+        expenseDao.updateExpenseImagePath(expenseId, imagePath)
+    }
+
     suspend fun addUserToGroup(groupId: String, userId: String): Boolean {
         val insertResult = groupMemberDao.addMember(
             GroupMemberEntity(

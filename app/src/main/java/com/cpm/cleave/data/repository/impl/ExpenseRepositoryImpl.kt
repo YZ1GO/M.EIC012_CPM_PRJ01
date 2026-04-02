@@ -1,6 +1,7 @@
 package com.cpm.cleave.data.repository.impl
 
 import android.util.Log
+import android.content.Context
 import com.cpm.cleave.BuildConfig
 import com.cpm.cleave.data.local.Cache
 import com.cpm.cleave.data.local.AuthSessionStore
@@ -39,12 +40,14 @@ import java.util.UUID
 import java.net.HttpURLConnection
 import java.net.URL
 import android.util.Base64
+import java.io.File
 import kotlin.coroutines.resume
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ExpenseRepositoryImpl(
+    private val appContext: Context,
     private val cache: Cache,
     private val authSessionStore: AuthSessionStore,
     private val pendingSyncStore: PendingSyncStore,
@@ -248,8 +251,9 @@ class ExpenseRepositoryImpl(
             val expenseId = UUID.randomUUID().toString()
             val now = System.currentTimeMillis()
             val receiptImagePath = if (receiptImageBytes != null) {
+                val localPath = persistReceiptLocally(expenseId, receiptImageBytes)
                 if (!connectivityStatus.isNetworkAvailable()) {
-                    null
+                    localPath
                 } else {
                     runCatching {
                         uploadReceiptImage(
@@ -260,9 +264,9 @@ class ExpenseRepositoryImpl(
                     }.getOrElse { error ->
                         Log.w(
                             "ExpenseRepo",
-                            "Receipt upload failed; creating expense without receipt image: ${error.message}"
+                            "Receipt upload failed; keeping local receipt for deferred sync: ${error.message}"
                         )
-                        null
+                        localPath
                     }
                 }
             } else {
@@ -297,7 +301,7 @@ class ExpenseRepositoryImpl(
                         date = now,
                         splitMemberIds = splitMemberIds,
                         payerContributions = normalizedContributions,
-                        imagePath = receiptImagePath
+                        imagePath = receiptImagePath.takeUnless { it.isLocalReceiptPath() }
                     )
                     true
                 } ?: false
@@ -328,6 +332,12 @@ class ExpenseRepositoryImpl(
                 listOf(PayerContribution(userId = localExpense.paidByUserId, amount = localExpense.amount))
             }
 
+            val syncedImagePath = resolveImagePathForSync(
+                groupId = pending.groupId,
+                expenseId = localExpense.id,
+                currentImagePath = localExpense.imagePath
+            )
+
             val syncSucceeded = runCatching {
                 withTimeoutOrNull(4000L) {
                     syncExpenseToRemote(
@@ -338,7 +348,7 @@ class ExpenseRepositoryImpl(
                         date = localExpense.date,
                         splitMemberIds = shares.map { it.userId },
                         payerContributions = payers.associate { it.userId to it.amount },
-                        imagePath = localExpense.imagePath
+                        imagePath = syncedImagePath
                     )
                     true
                 } ?: false
@@ -548,6 +558,51 @@ class ExpenseRepositoryImpl(
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun persistReceiptLocally(expenseId: String, imageBytes: ByteArray): String? {
+        return runCatching {
+            val dir = File(appContext.filesDir, "receipt-cache").apply { mkdirs() }
+            val file = File(dir, "$expenseId.jpg")
+            file.writeBytes(imageBytes)
+            "file://${file.absolutePath}"
+        }.getOrElse { error ->
+            Log.w("ExpenseRepo", "Could not persist local receipt cache: ${error.message}")
+            null
+        }
+    }
+
+    private suspend fun resolveImagePathForSync(
+        groupId: String,
+        expenseId: String,
+        currentImagePath: String?
+    ): String? {
+        if (currentImagePath.isNullOrBlank()) return null
+        if (!currentImagePath.isLocalReceiptPath()) return currentImagePath
+
+        val localFile = localReceiptFileFromPath(currentImagePath) ?: return null
+        if (!localFile.exists()) return null
+
+        val uploadedPath = runCatching {
+            uploadReceiptImage(groupId = groupId, expenseId = expenseId, imageBytes = localFile.readBytes())
+        }.getOrElse { error ->
+            Log.w("ExpenseRepo", "Deferred receipt upload failed: ${error.message}")
+            return currentImagePath
+        }
+
+        cache.updateExpenseImagePath(expenseId, uploadedPath)
+        runCatching { localFile.delete() }
+        return uploadedPath
+    }
+
+    private fun localReceiptFileFromPath(imagePath: String): File? {
+        val rawPath = imagePath.removePrefix("file://")
+        if (rawPath.isBlank()) return null
+        return File(rawPath)
+    }
+
+    private fun String?.isLocalReceiptPath(): Boolean {
+        return this?.startsWith("file://") == true
     }
 
     private suspend fun <T> Task<T>.awaitTaskResult(): T {

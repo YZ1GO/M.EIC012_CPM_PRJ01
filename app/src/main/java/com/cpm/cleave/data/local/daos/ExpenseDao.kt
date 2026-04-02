@@ -31,6 +31,9 @@ interface ExpenseDao {
     @Query("UPDATE expenses SET paidBy = :newUserId WHERE paidBy = :oldUserId")
     suspend fun reassignPaidByUser(oldUserId: String, newUserId: String)
 
+    @Query("UPDATE expenses SET imagePath = :imagePath WHERE id = :expenseId")
+    suspend fun updateExpenseImagePath(expenseId: String, imagePath: String?)
+
     @Query("DELETE FROM expenses WHERE groupId = :groupId")
     suspend fun deleteExpensesByGroup(groupId: String)
 }
