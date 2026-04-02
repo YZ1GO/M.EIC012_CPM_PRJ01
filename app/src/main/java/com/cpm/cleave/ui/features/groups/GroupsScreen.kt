@@ -50,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
@@ -154,12 +155,23 @@ fun GroupListItem(group: Group, onClick: () -> Unit) {
             .clickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // TODO CHANGE BOX TO IMAGE
+        val groupImageUrl = group.imageUrl?.takeIf { it.isNotBlank() }
         Box(
-            modifier = Modifier.size(64.dp).border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp)),
+            modifier = Modifier
+                .size(64.dp)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.Center
         ) {
-            Text("?", fontSize = 32.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (groupImageUrl != null) {
+                AsyncImage(
+                    model = groupImageUrl,
+                    contentDescription = "Group image",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(64.dp)
+                )
+            } else {
+                Text("?", fontSize = 32.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
 
         Spacer(modifier = Modifier.width(16.dp))

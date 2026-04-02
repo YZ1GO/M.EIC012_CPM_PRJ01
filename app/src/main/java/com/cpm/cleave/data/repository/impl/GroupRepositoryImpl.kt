@@ -292,6 +292,16 @@ class GroupRepositoryImpl(
                 val now = System.currentTimeMillis()
                 val groupRef = firestore.collection("groups").document(group.id)
                 val joinCodeRef = firestore.collection("group_join_codes").document(group.joinCode)
+                val groupPayload = mutableMapOf<String, Any?>(
+                    "name" to group.name,
+                    "currency" to group.currency,
+                    "joinCode" to group.joinCode,
+                    "updatedAt" to now
+                ).apply {
+                    if (!group.imageUrl.isNullOrBlank()) {
+                        put("imageUrl", group.imageUrl)
+                    }
+                }
 
                 firestore.runTransaction { transaction ->
                     val existing = transaction.get(joinCodeRef)
@@ -299,16 +309,7 @@ class GroupRepositoryImpl(
                         throw IllegalStateException(JOIN_CODE_COLLISION)
                     }
 
-                    transaction.set(
-                        groupRef,
-                        mapOf(
-                            "name" to group.name,
-                            "imageUrl" to group.imageUrl,
-                            "currency" to group.currency,
-                            "joinCode" to group.joinCode,
-                            "updatedAt" to now
-                        )
-                    )
+                    transaction.set(groupRef, groupPayload)
 
                     transaction.set(
                         joinCodeRef,
@@ -753,19 +754,23 @@ class GroupRepositoryImpl(
         val groupRef = firestore.collection("groups").document(group.id)
         val membersCollection = groupRef.collection("members")
         val incomingMembers = group.members.toSet()
+        val groupPayload = mutableMapOf<String, Any?>(
+            "name" to group.name,
+            "currency" to group.currency,
+            "joinCode" to group.joinCode,
+            "updatedAt" to now
+        ).apply {
+            if (!group.imageUrl.isNullOrBlank()) {
+                put("imageUrl", group.imageUrl)
+            }
+        }
 
         val existingMembersSnapshot = membersCollection.get().awaitTaskResult()
         val batch = firestore.batch()
 
         batch.set(
             groupRef,
-            mapOf(
-                "name" to group.name,
-                "imageUrl" to group.imageUrl,
-                "currency" to group.currency,
-                "joinCode" to group.joinCode,
-                "updatedAt" to now
-            ),
+            groupPayload,
             SetOptions.merge()
         )
 

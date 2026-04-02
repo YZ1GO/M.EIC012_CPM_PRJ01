@@ -11,10 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenuItem
@@ -22,7 +19,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -101,7 +97,7 @@ fun CreateGroupScreen(viewModel: CreateGroupViewModel, onNavigateBack: () -> Uni
                 Text(if (uiState.selectedImageUri == null) "Choose image" else "Change image")
             }
 
-            val imageModel = uiState.uploadedImageUrl ?: uiState.selectedImageUri
+            val imageModel = uiState.selectedImageUri ?: uiState.uploadedImageUrl
             if (!imageModel.isNullOrBlank()) {
                 Spacer(modifier = Modifier.height(12.dp))
                 AsyncImage(
@@ -118,30 +114,17 @@ fun CreateGroupScreen(viewModel: CreateGroupViewModel, onNavigateBack: () -> Uni
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Name Input Row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Default.CameraAlt,
-                contentDescription = "Group Picture",
-                modifier = Modifier.size(40.dp)
+        // Name Input
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text("Group name", fontSize = 14.sp)
+            OutlinedTextField(
+                value = uiState.Name,
+                onValueChange = { viewModel.onNameChanged(it) },
+                placeholder = { Text("Value") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                singleLine = true
             )
-
-            Spacer(modifier = Modifier.width(16.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Group name", fontSize = 14.sp)
-                OutlinedTextField(
-                    value = uiState.Name,
-                    onValueChange = { viewModel.onNameChanged(it) },
-                    placeholder = { Text("Value") },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    singleLine = true
-                )
-            }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
