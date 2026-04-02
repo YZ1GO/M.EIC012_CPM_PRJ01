@@ -5,6 +5,9 @@ plugins {
     id("com.google.gms.google-services")
 }
 
+val supabaseUploadUrl = ((project.findProperty("SUPABASE_UPLOAD_URL") as String?) ?: "")
+    .replace("\"", "\\\"")
+
 android {
     namespace = "com.cpm.cleave"
     compileSdk {
@@ -19,6 +22,8 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+
+        buildConfigField("String", "SUPABASE_UPLOAD_URL", "\"$supabaseUploadUrl\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -35,6 +40,10 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 }
 
@@ -81,5 +90,7 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.6.0")
     implementation("androidx.camera:camera-view:1.6.0")
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("com.google.zxing:core:3.5.4")
+    implementation("io.coil-kt:coil-compose:2.7.0")
 }

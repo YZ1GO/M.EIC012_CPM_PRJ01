@@ -29,6 +29,30 @@ Run:
 
 If both commands pass, Firebase is configured correctly on your machine.
 
+## Supabase receipt upload
+
+Receipt image upload goes through a Supabase Edge Function.
+
+1. Deploy the `receipts` function in `supabase/functions/receipts`.
+2. Set function secrets:
+
+```bash
+supabase secrets set APP_SUPABASE_URL=https://<project-ref>.supabase.co
+supabase secrets set APP_SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
+```
+
+3. Set app endpoint URL in `~/.gradle/gradle.properties` or project `gradle.properties`:
+
+```properties
+SUPABASE_UPLOAD_URL=https://<project-ref>.functions.supabase.co
+```
+
+4. The app calls `POST {SUPABASE_UPLOAD_URL}/receipts/upload` and expects:
+
+```json
+{ "receiptUrl": "https://..." }
+```
+
 ## Netlify App Link Hosting
 
 If you host the Android App Link files on Netlify, deploy the contents of `docs/` as the site root.

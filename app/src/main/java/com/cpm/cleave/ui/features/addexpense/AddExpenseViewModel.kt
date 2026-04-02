@@ -3,6 +3,7 @@ package com.cpm.cleave.ui.features.addexpense
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cpm.cleave.domain.repository.contracts.IAuthRepository
+import com.cpm.cleave.domain.repository.contracts.IScannerRepository
 import com.cpm.cleave.domain.usecase.GetAddExpenseMembersUseCase
 import com.cpm.cleave.domain.usecase.RequestCreateExpenseUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -10,9 +11,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 class AddExpenseViewModel(
     private val authRepository: IAuthRepository,
+    private val scannerRepository: IScannerRepository,
     private val getAddExpenseMembersUseCase: GetAddExpenseMembersUseCase,
     private val requestCreateExpenseUseCase: RequestCreateExpenseUseCase,
     private val groupId: String
@@ -20,6 +23,7 @@ class AddExpenseViewModel(
 
     private val _uiState = MutableStateFlow(AddExpenseUiState())
     val uiState: StateFlow<AddExpenseUiState> = _uiState.asStateFlow()
+    private var receiptImageBytes: ByteArray? = null
 
     init {
         loadGroupMembers()
@@ -84,6 +88,56 @@ class AddExpenseViewModel(
 
     fun onDescriptionChanged(value: String) {
         _uiState.update { it.copy(description = value, errorMessage = null) }
+    }
+
+    fun onReceiptImageSelected(imageBytes: ByteArray?) {
+        receiptImageBytes = imageBytes
+        _uiState.update {
+            it.copy(
+                hasReceiptImage = imageBytes != null,
+                receiptMessage = if (imageBytes != null) "Receipt attached" else null,
+                errorMessage = null
+            )
+        }
+    }
+
+    fun extractTotalFromReceipt() {
+        val imageBytes = receiptImageBytes
+        if (imageBytes == null) {
+            _uiState.update { it.copy(errorMessage = "Capture a receipt image first") }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isExtractingTotal = true, receiptMessage = null, errorMessage = null) }
+            scannerRepository.extractReceiptTotal(imageBytes)
+                .onSuccess { total ->
+                    if (total != null && total > 0.0) {
+                        onAmountChanged(String.format(Locale.US, "%.2f", total))
+                        _uiState.update {
+                            it.copy(
+                                isExtractingTotal = false,
+                                receiptMessage = "Extracted total: ${String.format(Locale.US, "%.2f", total)}"
+                            )
+                        }
+                    } else {
+                        _uiState.update {
+                            it.copy(
+                                isExtractingTotal = false,
+                                receiptMessage = "Could not detect a total. You can still type it manually."
+                            )
+                        }
+                    }
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            isExtractingTotal = false,
+                            errorMessage = error.message ?: "Could not read receipt total"
+                        )
+                    }
+                }
+        }
     }
 
     fun onBuyerModeChanged(mode: BuyerMode) {
@@ -255,7 +309,8 @@ class AddExpenseViewModel(
                 amount = amount,
                 description = state.description,
                 splitMemberIds = splitMemberIds,
-                payerContributions = payerContributions
+                payerContributions = payerContributions,
+                receiptImageBytes = receiptImageBytes
             ).onSuccess {
                 _uiState.update { it.copy(isLoading = false) }
                 onSuccess()

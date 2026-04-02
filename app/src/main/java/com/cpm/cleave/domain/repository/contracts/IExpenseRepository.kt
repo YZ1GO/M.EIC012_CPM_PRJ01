@@ -15,6 +15,7 @@ interface IExpenseRepository {
         amount: Double,
         description: String,
         splitMemberIds: List<String>,
-        payerContributions: Map<String, Double>
+        payerContributions: Map<String, Double>,
+        receiptImageBytes: ByteArray? = null
     ): Result<Unit>
 }

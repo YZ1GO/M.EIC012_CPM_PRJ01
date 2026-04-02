@@ -16,3 +16,4 @@ local.properties
 .idea/
 
 *.log
+supabase/.temp/

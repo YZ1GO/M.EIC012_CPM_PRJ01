@@ -21,6 +21,9 @@ data class AddExpenseUiState(
     val payerAmountInputs: Map<String, String> = emptyMap(),
     val splitMode: SplitMode = SplitMode.ALL_MEMBERS,
     val selectedSplitMemberIds: Set<String> = emptySet(),
+    val hasReceiptImage: Boolean = false,
+    val isExtractingTotal: Boolean = false,
+    val receiptMessage: String? = null,
     val isLoading: Boolean = false,
     val errorMessage: String? = null
 )

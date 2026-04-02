@@ -71,6 +71,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
+import coil.compose.AsyncImage
 
 @Composable
 fun GroupsScreen(groupsViewModel: GroupsViewModel, onGroupClick: (String) -> Unit) {
@@ -197,6 +198,7 @@ fun GroupDetailsScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var showQrDialog by remember { mutableStateOf(false) }
+    var selectedReceiptUrl by remember { mutableStateOf<String?>(null) }
     val colorScheme = MaterialTheme.colorScheme
 
     LaunchedEffect(Unit) { viewModel.refreshGroupData() }
@@ -278,6 +280,13 @@ fun GroupDetailsScreen(
             )
         }
 
+        selectedReceiptUrl?.let { receiptUrl ->
+            ReceiptImageDialog(
+                receiptUrl = receiptUrl,
+                onDismiss = { selectedReceiptUrl = null }
+            )
+        }
+
         uiState.errorMessage?.let { Text(it, color = colorScheme.error) }
 
         Column(modifier = sectionModifier) {
@@ -322,7 +331,10 @@ fun GroupDetailsScreen(
                 uiState.expenses.forEach { expense ->
                     ExpenseDetailsItem(
                         expense = expense,
-                        userDisplayNames = uiState.userDisplayNames
+                        userDisplayNames = uiState.userDisplayNames,
+                        onViewReceipt = { receiptUrl ->
+                            selectedReceiptUrl = receiptUrl
+                        }
                     )
                 }
             }
@@ -385,6 +397,31 @@ fun GroupDetailsScreen(
 }
 
 @Composable
+private fun ReceiptImageDialog(
+    receiptUrl: String,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+        title = { Text("Expense receipt") },
+        text = {
+            AsyncImage(
+                model = receiptUrl,
+                contentDescription = "Receipt image",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(320.dp)
+            )
+        }
+    )
+}
+
+@Composable
 private fun GroupQrDialog(
     groupName: String,
     joinCode: String,
@@ -438,7 +475,11 @@ private fun generateQrBitmap(content: String, size: Int): Bitmap? {
 }
 
 @Composable
-private fun ExpenseDetailsItem(expense: Expense, userDisplayNames: Map<String, String>) {
+private fun ExpenseDetailsItem(
+    expense: Expense,
+    userDisplayNames: Map<String, String>,
+    onViewReceipt: (String) -> Unit
+) {
     val desc = expense.description.ifBlank { "(No description)" }
     val payerText = expense.payerContributions
         .joinToString(separator = ", ") { payer ->
@@ -486,6 +527,14 @@ private fun ExpenseDetailsItem(expense: Expense, userDisplayNames: Map<String, S
         }
         Spacer(modifier = Modifier.height(4.dp))
         Text(text = dateText, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+
+        val receiptUrl = expense.imagePath?.takeIf { it.isNotBlank() }
+        if (receiptUrl != null) {
+            Spacer(modifier = Modifier.height(6.dp))
+            TextButton(onClick = { onViewReceipt(receiptUrl) }) {
+                Text("View receipt")
+            }
+        }
     }
 }
 

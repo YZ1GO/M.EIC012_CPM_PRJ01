@@ -10,14 +10,16 @@ class RequestCreateExpenseUseCase(
         amount: Double,
         description: String,
         splitMemberIds: List<String>,
-        payerContributions: Map<String, Double>
+        payerContributions: Map<String, Double>,
+        receiptImageBytes: ByteArray? = null
     ): Result<Unit> {
         return expenseRepository.createExpense(
             groupId = groupId,
             amount = amount,
             description = description,
             splitMemberIds = splitMemberIds,
-            payerContributions = payerContributions
+            payerContributions = payerContributions,
+            receiptImageBytes = receiptImageBytes
         )
     }
 }

@@ -1,5 +1,12 @@
 package com.cpm.cleave.ui.features.addexpense
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -10,12 +17,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -23,23 +34,45 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.rememberScrollState
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import androidx.core.content.FileProvider
 
 @Composable
 fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
     val scrollState = rememberScrollState()
     val titleTopSpacing = 24.dp
     val titleBottomSpacing = 32.dp
     val sectionSpacing = 16.dp
     val colorScheme = MaterialTheme.colorScheme
+    var receiptBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var currentReceiptUri by remember { mutableStateOf<Uri?>(null) }
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (!success) return@rememberLauncherForActivityResult
+        val receiptUri = currentReceiptUri ?: return@rememberLauncherForActivityResult
+        val prepared = loadPreparedReceipt(context, receiptUri)
+        receiptBitmap = prepared?.first
+        viewModel.onReceiptImageSelected(prepared?.second)
+    }
     val labelForMember: (String) -> String = { memberId ->
         uiState.memberDisplayNames[memberId] ?: memberId
     }
@@ -89,6 +122,64 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)
             )
+        }
+
+        Spacer(modifier = Modifier.height(sectionSpacing))
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(colorScheme.surfaceVariant.copy(alpha = 0.24f), RoundedCornerShape(16.dp))
+                .border(1.dp, colorScheme.outlineVariant.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
+                .padding(12.dp)
+        ) {
+            Text("Receipt (optional)", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Button(
+                onClick = {
+                    val imageUri = createReceiptImageUri(context) ?: return@Button
+                    currentReceiptUri = imageUri
+                    cameraLauncher.launch(imageUri)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = colorScheme.secondaryContainer),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CameraAlt,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.size(8.dp))
+                Text(if (receiptBitmap == null) "Capture receipt" else "Retake receipt")
+            }
+
+            if (receiptBitmap != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Image(
+                    bitmap = receiptBitmap!!.asImageBitmap(),
+                    contentDescription = "Receipt preview",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(180.dp)
+                        .border(1.dp, colorScheme.outlineVariant, RoundedCornerShape(10.dp))
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(
+                    onClick = { viewModel.extractTotalFromReceipt() },
+                    enabled = !uiState.isExtractingTotal,
+                    colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primary),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(if (uiState.isExtractingTotal) "Reading receipt..." else "Extract total from receipt")
+                }
+            }
+
+            uiState.receiptMessage?.let {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(text = it, color = colorScheme.onSurfaceVariant, fontSize = 12.sp)
+            }
         }
 
         Spacer(modifier = Modifier.height(sectionSpacing))
@@ -304,4 +395,59 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
             Text(if (uiState.isLoading) "Creating..." else "Create Expense")
         }
     }
+}
+
+private fun Bitmap.toJpegBytes(quality: Int = 90): ByteArray {
+    val output = ByteArrayOutputStream()
+    compress(Bitmap.CompressFormat.JPEG, quality, output)
+    return output.toByteArray()
+}
+
+private fun createReceiptImageUri(context: Context): Uri? {
+    return runCatching {
+        val dir = File(context.cacheDir, "receipt_images").apply { mkdirs() }
+        val file = File(dir, "receipt_${System.currentTimeMillis()}.jpg")
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    }.getOrNull()
+}
+
+private fun loadPreparedReceipt(context: Context, uri: Uri): Pair<Bitmap, ByteArray>? {
+    return runCatching {
+        val file = uriToFile(context, uri) ?: return@runCatching null
+        val sampledBitmap = decodeSampledBitmap(file, targetMaxDimension = 2200) ?: return@runCatching null
+        val jpegBytes = sampledBitmap.toJpegBytes(quality = 92)
+        sampledBitmap to jpegBytes
+    }.getOrNull()
+}
+
+private fun uriToFile(context: Context, uri: Uri): File? {
+    return if (uri.scheme == "file") {
+        uri.path?.let { File(it) }
+    } else {
+        // FileProvider content uri backed by our own cache file.
+        val temp = File(context.cacheDir, "receipt_copy_${System.currentTimeMillis()}.jpg")
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            FileOutputStream(temp).use { output -> input.copyTo(output) }
+        }
+        if (temp.exists()) temp else null
+    }
+}
+
+private fun decodeSampledBitmap(file: File, targetMaxDimension: Int): Bitmap? {
+    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    FileInputStream(file).use { input -> BitmapFactory.decodeStream(input, null, options) }
+    val maxDim = maxOf(options.outWidth, options.outHeight)
+    if (maxDim <= 0) return null
+
+    var sampleSize = 1
+    while (maxDim / sampleSize > targetMaxDimension) {
+        sampleSize *= 2
+    }
+
+    val decodeOptions = BitmapFactory.Options().apply {
+        inSampleSize = sampleSize
+        inPreferredConfig = Bitmap.Config.ARGB_8888
+    }
+
+    return FileInputStream(file).use { input -> BitmapFactory.decodeStream(input, null, decodeOptions) }
 }

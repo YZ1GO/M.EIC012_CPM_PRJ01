@@ -355,6 +355,7 @@ fun MainScreen(
                         initializer {
                             AddExpenseViewModel(
                                 authRepository = authRepository,
+                                scannerRepository = scannerRepository,
                                 getAddExpenseMembersUseCase = GetAddExpenseMembersUseCase(groupRepository),
                                 requestCreateExpenseUseCase = RequestCreateExpenseUseCase(expenseRepository),
                                 groupId = groupId

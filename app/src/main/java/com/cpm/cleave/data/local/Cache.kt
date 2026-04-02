@@ -135,7 +135,8 @@ class Cache(context: Context) {
         date: Long,
         groupId: String,
         payerContributions: Map<String, Double>,
-        memberIds: List<String>
+        memberIds: List<String>,
+        imagePath: String? = null
     ) {
         database.withTransaction {
             if (payerContributions.isEmpty()) return@withTransaction
@@ -147,7 +148,8 @@ class Cache(context: Context) {
                 description = description,
                 date = date,
                 groupId = groupId,
-                paidBy = primaryPayer
+                paidBy = primaryPayer,
+                imagePath = imagePath
             )
             expenseDao.insertExpense(expense)
             expensePayerDao.deletePayersForExpense(expenseId)

@@ -1,5 +1,7 @@
 package com.cpm.cleave.data.repository.impl
 
+import android.util.Log
+import com.cpm.cleave.BuildConfig
 import com.cpm.cleave.data.local.Cache
 import com.cpm.cleave.data.local.AuthSessionStore
 import com.cpm.cleave.data.local.ConnectivityStatus
@@ -29,8 +31,14 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.delay
+import org.json.JSONObject
 import java.util.UUID
+import java.net.HttpURLConnection
+import java.net.URL
+import android.util.Base64
 import kotlin.coroutines.resume
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -217,7 +225,8 @@ class ExpenseRepositoryImpl(
         amount: Double,
         description: String,
         splitMemberIds: List<String>,
-        payerContributions: Map<String, Double>
+        payerContributions: Map<String, Double>,
+        receiptImageBytes: ByteArray?
     ): Result<Unit> {
         return try {
             val currentUser = authSessionStore.getActiveUser()
@@ -238,6 +247,27 @@ class ExpenseRepositoryImpl(
 
             val expenseId = UUID.randomUUID().toString()
             val now = System.currentTimeMillis()
+            val receiptImagePath = if (receiptImageBytes != null) {
+                if (!connectivityStatus.isNetworkAvailable()) {
+                    null
+                } else {
+                    runCatching {
+                        uploadReceiptImage(
+                            groupId = groupId,
+                            expenseId = expenseId,
+                            imageBytes = receiptImageBytes
+                        )
+                    }.getOrElse { error ->
+                        Log.w(
+                            "ExpenseRepo",
+                            "Receipt upload failed; creating expense without receipt image: ${error.message}"
+                        )
+                        null
+                    }
+                }
+            } else {
+                null
+            }
 
             cache.insertExpenseWithSplit(
                 expenseId = expenseId,
@@ -246,7 +276,8 @@ class ExpenseRepositoryImpl(
                 date = now,
                 groupId = groupId,
                 payerContributions = normalizedContributions,
-                memberIds = splitMemberIds
+                memberIds = splitMemberIds,
+                imagePath = receiptImagePath
             )
 
             localExpenseRefreshEvents.tryEmit(groupId)
@@ -265,7 +296,8 @@ class ExpenseRepositoryImpl(
                         description = description,
                         date = now,
                         splitMemberIds = splitMemberIds,
-                        payerContributions = normalizedContributions
+                        payerContributions = normalizedContributions,
+                        imagePath = receiptImagePath
                     )
                     true
                 } ?: false
@@ -305,7 +337,8 @@ class ExpenseRepositoryImpl(
                         description = localExpense.description,
                         date = localExpense.date,
                         splitMemberIds = shares.map { it.userId },
-                        payerContributions = payers.associate { it.userId to it.amount }
+                        payerContributions = payers.associate { it.userId to it.amount },
+                        imagePath = localExpense.imagePath
                     )
                     true
                 } ?: false
@@ -387,7 +420,8 @@ class ExpenseRepositoryImpl(
         description: String,
         date: Long,
         splitMemberIds: List<String>,
-        payerContributions: Map<String, Double>
+        payerContributions: Map<String, Double>,
+        imagePath: String?
     ) {
         val now = System.currentTimeMillis()
         val groupRef = firestore.collection("groups").document(groupId)
@@ -403,6 +437,7 @@ class ExpenseRepositoryImpl(
                 "date" to date,
                 "groupId" to groupId,
                 "paidByUserId" to primaryPayerId,
+                "imagePath" to imagePath,
                 "updatedAt" to now
             ),
             SetOptions.merge()
@@ -438,6 +473,81 @@ class ExpenseRepositoryImpl(
         }
 
         batch.commit().awaitTaskResult()
+    }
+
+    private suspend fun uploadReceiptImage(
+        groupId: String,
+        expenseId: String,
+        imageBytes: ByteArray
+    ): String {
+        val baseUrl = BuildConfig.SUPABASE_UPLOAD_URL.trim().trimEnd('/')
+        if (baseUrl.isBlank()) {
+            throw IllegalStateException("SUPABASE_UPLOAD_URL is not configured")
+        }
+
+        var lastError: Exception? = null
+        repeat(5) { attempt ->
+            try {
+                return uploadReceiptViaHttp(
+                    endpointUrl = "$baseUrl/receipts/upload",
+                    groupId = groupId,
+                    expenseId = expenseId,
+                    imageBytes = imageBytes
+                )
+            } catch (error: Exception) {
+                lastError = error
+                delay(250L * (attempt + 1))
+            }
+        }
+
+        throw IllegalStateException(
+            "Receipt was uploaded but its URL could not be resolved. Please try again.",
+            lastError
+        )
+    }
+
+    private suspend fun uploadReceiptViaHttp(
+        endpointUrl: String,
+        groupId: String,
+        expenseId: String,
+        imageBytes: ByteArray
+    ): String = withContext(Dispatchers.IO) {
+        val payload = JSONObject().apply {
+            put("groupId", groupId)
+            put("expenseId", expenseId)
+            put("imageBase64", Base64.encodeToString(imageBytes, Base64.NO_WRAP))
+        }
+
+        val connection = (URL(endpointUrl).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 15000
+            readTimeout = 45000
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Accept", "application/json")
+        }
+
+        try {
+            connection.outputStream.use { it.write(payload.toString().toByteArray()) }
+            val status = connection.responseCode
+            val body = runCatching {
+                val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+                stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            }.getOrDefault("")
+
+            if (status !in 200..299) {
+                throw IllegalStateException("Receipt upload failed (HTTP $status): $body")
+            }
+
+            val response = JSONObject(body)
+            val receiptUrl = response.optString("receiptUrl")
+            if (receiptUrl.isBlank()) {
+                throw IllegalStateException("Receipt upload endpoint did not return receiptUrl")
+            }
+            receiptUrl
+        } finally {
+            connection.disconnect()
+        }
     }
 
     private suspend fun <T> Task<T>.awaitTaskResult(): T {
