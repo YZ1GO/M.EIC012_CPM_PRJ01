@@ -61,9 +61,8 @@ class GroupRepositoryImpl(
     override fun observeGroups(): Flow<List<Group>> = authSessionStore.observeActiveUser()
         .distinctUntilChanged { old, new -> old?.id == new?.id }
         .flatMapLatest { user ->
-            if (user == null) return@flatMapLatest kotlinx.coroutines.flow.flowOf(emptyList())
-
-            val userId = user.id // This will now be updated automatically after merge
+            val userId = firebaseAuth.currentUser?.uid ?: user?.id
+            if (userId.isNullOrBlank()) return@flatMapLatest kotlinx.coroutines.flow.flowOf(emptyList())
 
             callbackFlow {
                 val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -450,11 +449,21 @@ class GroupRepositoryImpl(
     override suspend fun getGroups(): Result<List<Group>> {
         return try {
             val currentUser = authSessionStore.getActiveUser()
-            if (currentUser == null) {
+            val firebaseUserId = firebaseAuth.currentUser?.uid
+            val effectiveUserId = firebaseUserId ?: currentUser?.id
+
+            if (effectiveUserId.isNullOrBlank()) {
                 return Result.success(emptyList())
             }
 
-            val localGroups = cache.loadGroups(currentUser.id)
+            if (!firebaseUserId.isNullOrBlank() && currentUser?.id != firebaseUserId) {
+                android.util.Log.w(
+                    "GroupRepo",
+                    "Using Firebase UID for group fetch due to local session mismatch. firebaseUid=$firebaseUserId localUid=${currentUser?.id}"
+                )
+            }
+
+            val localGroups = cache.loadGroups(effectiveUserId)
             if (!connectivityStatus.isNetworkAvailable()) {
                 return Result.success(localGroups)
             }
@@ -464,7 +473,7 @@ class GroupRepositoryImpl(
             val remoteResult = runCatching {
                 val remoteGroups = withTimeoutOrNull(4000L) {
                     fetchGroupsFromRemote(
-                        userId = currentUser.id,
+                        userId = effectiveUserId,
                         knownLocalGroupIds = localGroups.map { it.id }
                     )
                 } ?: throw IllegalStateException("Remote groups fetch timed out")
@@ -478,7 +487,7 @@ class GroupRepositoryImpl(
                     if (localGroup.id !in remoteGroupIds) {
                         val isMemberRemotely = try {
                             withTimeoutOrNull(1500L) {
-                                remoteGroupHasMember(localGroup.id, currentUser.id)
+                                remoteGroupHasMember(localGroup.id, effectiveUserId)
                             }
                         } catch (e: Exception) {
                             if (e is com.google.firebase.firestore.FirebaseFirestoreException && 
@@ -499,21 +508,21 @@ class GroupRepositoryImpl(
                 flushPendingGroupSyncs()
 
                 warmExpensesCache(remoteGroups.map { it.id })
-                cache.loadGroups(currentUser.id)
+                cache.loadGroups(effectiveUserId)
             }.recoverCatching {
                 // Sign-out/sign-in can briefly race auth + rules propagation and return PERMISSION_DENIED.
                 // Retry once after a short delay before falling back to local cache.
                 delay(900)
                 val retriedRemoteGroups = withTimeoutOrNull(4000L) {
                     fetchGroupsFromRemote(
-                        userId = currentUser.id,
+                        userId = effectiveUserId,
                         knownLocalGroupIds = localGroups.map { it.id }
                     )
                 } ?: throw IllegalStateException("Remote groups fetch timed out")
 
                 retriedRemoteGroups.forEach { cache.upsertGroupWithMembers(it) }
                 warmExpensesCache(retriedRemoteGroups.map { it.id })
-                cache.loadGroups(currentUser.id)
+                cache.loadGroups(effectiveUserId)
             }
 
             val groups = remoteResult.getOrElse {
@@ -600,7 +609,7 @@ class GroupRepositoryImpl(
             }
 
             val normalizedJoinCode = joinCode.trim().uppercase(Locale.ROOT)
-            val currentUser = authSessionStore.getActiveUser() 
+            val currentUserId = firebaseAuth.currentUser?.uid ?: authSessionStore.getActiveUser()?.id
                 ?: return Result.failure(IllegalStateException("No current user found."))
 
             val mappedGroupId = runCatching {
@@ -613,7 +622,7 @@ class GroupRepositoryImpl(
 
             val remoteJoinSucceeded = runCatching {
                 withTimeoutOrNull(6000L) {
-                    syncGroupMembershipToRemote(groupId = mappedGroupId, userId = currentUser.id)
+                    syncGroupMembershipToRemote(groupId = mappedGroupId, userId = currentUserId)
                     true
                 } ?: false
             }.getOrDefault(false)

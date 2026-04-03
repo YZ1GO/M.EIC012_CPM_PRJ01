@@ -189,7 +189,6 @@ override suspend fun signUpWithEmail(
             val user = authResult.user ?: return Result.failure(IllegalStateException("No user"))
 
             user.updateProfile(UserProfileChangeRequest.Builder().setDisplayName(name.trim()).build()).awaitTaskResult()
-            ensureUserDocument(user.uid, name.trim(), user.email, false)
 
             val mergedUser = authSessionStore.activateRegisteredUserAfterAuthentication(
                 user.uid,
@@ -198,6 +197,10 @@ override suspend fun signUpWithEmail(
                 user.photoUrl?.toString(),
                 mergeAnonymousData
             )
+
+            runCatching {
+                ensureUserDocument(user.uid, name.trim(), user.email, false)
+            }
 
             // 2. Perform Migration & Invalidate
             handleDataMigration(oldState, user.uid, mergeAnonymousData)
@@ -215,14 +218,6 @@ override suspend fun signUpWithEmail(
             val authResult = firebaseAuth.signInWithEmailAndPassword(email.trim(), password).awaitTaskResult()
             val user = authResult.user ?: return Result.failure(IllegalStateException("No user"))
 
-            ensureUserDocument(
-                user.uid,
-                user.displayName ?: "User",
-                user.email,
-                false,
-                user.photoUrl?.toString()
-            )
-
             val mergedUser = authSessionStore.activateRegisteredUserAfterAuthentication(
                 user.uid,
                 user.displayName ?: "User",
@@ -230,6 +225,16 @@ override suspend fun signUpWithEmail(
                 user.photoUrl?.toString(),
                 mergeAnonymousData
             )
+
+            runCatching {
+                ensureUserDocument(
+                    user.uid,
+                    user.displayName ?: "User",
+                    user.email,
+                    false,
+                    user.photoUrl?.toString()
+                )
+            }
 
             handleDataMigration(oldState, user.uid, mergeAnonymousData)
 
@@ -247,14 +252,6 @@ override suspend fun signUpWithEmail(
             val authResult = firebaseAuth.signInWithCredential(credential).awaitTaskResult()
             val user = authResult.user ?: return Result.failure(IllegalStateException("No user"))
 
-            ensureUserDocument(
-                user.uid,
-                user.displayName ?: "User",
-                user.email,
-                false,
-                user.photoUrl?.toString()
-            )
-
             val mergedUser = authSessionStore.activateRegisteredUserAfterAuthentication(
                 user.uid,
                 user.displayName ?: "User",
@@ -262,6 +259,16 @@ override suspend fun signUpWithEmail(
                 user.photoUrl?.toString(),
                 mergeAnonymousData
             )
+
+            runCatching {
+                ensureUserDocument(
+                    user.uid,
+                    user.displayName ?: "User",
+                    user.email,
+                    false,
+                    user.photoUrl?.toString()
+                )
+            }
 
             handleDataMigration(oldState, user.uid, mergeAnonymousData)
 
