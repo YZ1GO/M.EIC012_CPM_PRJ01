@@ -46,6 +46,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -326,7 +327,8 @@ fun GroupDetailsScreen(
                 ) {
                     currentGroup.members.forEach { memberId ->
                         val memberName = uiState.userDisplayNames[memberId] ?: memberId
-                        MemberAvatar(name = memberName)
+                        val memberPhotoUrl = uiState.userPhotoUrls[memberId]
+                        MemberAvatar(name = memberName, photoUrl = memberPhotoUrl)
                     }
                 }
             }
@@ -604,7 +606,7 @@ private fun HeaderChip(
 }
 
 @Composable
-private fun MemberAvatar(name: String) {
+private fun MemberAvatar(name: String, photoUrl: String? = null) {
     val initial = name.firstOrNull()?.uppercaseChar()?.toString() ?: "?"
     val avatarColors = listOf(
         Color(0xFF2563EB),
@@ -619,10 +621,23 @@ private fun MemberAvatar(name: String) {
     Box(
         modifier = Modifier
             .size(40.dp)
-            .background(avatarColor, CircleShape),
+            .background(avatarColor, CircleShape)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f), CircleShape),
         contentAlignment = Alignment.Center
     ) {
-        Text(text = initial, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        val model = photoUrl?.takeIf { it.isNotBlank() }
+        if (model != null) {
+            AsyncImage(
+                model = model,
+                contentDescription = "Member photo",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+            )
+        } else {
+            Text(text = initial, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        }
     }
 }
 

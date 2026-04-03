@@ -7,5 +7,6 @@ data class User(
     val isAnonymous: Boolean,
     val isDeleted: Boolean,
     val lastSeen: Long,
-    val groups: List<String>
+    val groups: List<String>,
+    val photoUrl: String? = null
 )

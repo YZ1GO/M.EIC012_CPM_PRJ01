@@ -12,5 +12,6 @@ data class GroupDetailsUiState(
     val debts: List<Debt> = emptyList(),
     val debtsWithReason: List<DebtWithReason> = emptyList(),
     val userDisplayNames: Map<String, String> = emptyMap(),
+    val userPhotoUrls: Map<String, String> = emptyMap(),
     val errorMessage: String? = null
 )

@@ -44,6 +44,7 @@ class GroupDetailsViewModel(
                                     debts = data.debts,
                                     debtsWithReason = data.debtsWithReason,
                                     userDisplayNames = data.userDisplayNames,
+                                    userPhotoUrls = data.userPhotoUrls,
                                     errorMessage = null
                                 )
                             }
@@ -74,6 +75,7 @@ class GroupDetailsViewModel(
                             debts = data.debts,
                             debtsWithReason = data.debtsWithReason,
                             userDisplayNames = data.userDisplayNames,
+                            userPhotoUrls = data.userPhotoUrls,
                             errorMessage = null
                         )
                     }

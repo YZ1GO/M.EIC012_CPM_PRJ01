@@ -28,6 +28,7 @@ data class GroupDetailsData(
     val debts: List<Debt>,
     val debtsWithReason: List<DebtWithReason>,
     val userDisplayNames: Map<String, String>,
+    val userPhotoUrls: Map<String, String>,
     val currentUserId: String?
 )
 
@@ -65,6 +66,12 @@ class GetGroupDetailsUseCase(
             sharesByExpenseId = sharesByExpenseId,
             currentUserId = currentUserId
         )
+        val userPhotoUrls = resolveUserPhotoUrls(
+            group = group,
+            expenses = expenses,
+            debts = debts,
+            sharesByExpenseId = sharesByExpenseId
+        )
 
         return Result.success(
             GroupDetailsData(
@@ -73,6 +80,7 @@ class GetGroupDetailsUseCase(
                 debts = debts,
                 debtsWithReason = debtsWithReason,
                 userDisplayNames = userDisplayNames,
+                userPhotoUrls = userPhotoUrls,
                 currentUserId = currentUserId
             )
         )
@@ -109,6 +117,12 @@ class GetGroupDetailsUseCase(
                     sharesByExpenseId = sharesByExpenseId,
                     currentUserId = currentUserId
                 )
+                val userPhotoUrls = resolveUserPhotoUrls(
+                    group = group,
+                    expenses = observedExpenses,
+                    debts = debts,
+                    sharesByExpenseId = sharesByExpenseId
+                )
 
                 Result.success(
                     GroupDetailsData(
@@ -117,6 +131,7 @@ class GetGroupDetailsUseCase(
                         debts = debts,
                         debtsWithReason = debtsWithReason,
                         userDisplayNames = userDisplayNames,
+                        userPhotoUrls = userPhotoUrls,
                         currentUserId = currentUserId
                     )
                 )
@@ -205,6 +220,35 @@ class GetGroupDetailsUseCase(
                         ?: "User ${userId.take(6)}"
                 }
             }
+    }
+
+    private suspend fun resolveUserPhotoUrls(
+        group: Group,
+        expenses: List<Expense>,
+        debts: List<Debt>,
+        sharesByExpenseId: Map<String, List<ExpenseShare>>
+    ): Map<String, String> {
+        val ids = mutableSetOf<String>()
+        ids.addAll(group.members)
+        expenses.forEach { expense ->
+            ids.add(expense.paidByUserId)
+            expense.payerContributions.forEach { contribution -> ids.add(contribution.userId) }
+            sharesByExpenseId[expense.id].orEmpty().forEach { share -> ids.add(share.userId) }
+        }
+        debts.forEach { debt ->
+            ids.add(debt.fromUser)
+            ids.add(debt.toUser)
+        }
+
+        return ids
+            .filter { it.isNotBlank() }
+            .mapNotNull { userId ->
+                authRepository.getUserPhotoUrl(userId)
+                    .getOrNull()
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { url -> userId to url }
+            }
+            .toMap()
     }
 
     private fun toCents(amount: Double): Long {

@@ -9,6 +9,7 @@ data class UserEntity(
     val id: String,
     val name: String,
     val email: String?,
+    val photoUrl: String? = null,
     val isAnonymous: Boolean,
     val isDeleted: Boolean,
     val isSessionActive: Boolean = false,

@@ -1,5 +1,8 @@
 package com.cpm.cleave.data.repository.impl
 
+import android.net.Uri
+import android.util.Base64
+import com.cpm.cleave.BuildConfig
 import com.cpm.cleave.data.local.AuthSessionStore
 import com.cpm.cleave.data.local.Cache
 import com.cpm.cleave.domain.repository.AnonymousLimits
@@ -12,7 +15,12 @@ import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 import kotlin.coroutines.resume
 
 class AuthRepositoryImpl(
@@ -31,13 +39,15 @@ class AuthRepositoryImpl(
                 if (firebaseUser.isAnonymous) {
                     val activatedAnonymous = authSessionStore.activateAnonymousUserSession(
                         anonymousUserId = firebaseUser.uid,
-                        anonymousName = firebaseUser.displayName ?: "Guest"
+                        anonymousName = firebaseUser.displayName ?: "Guest",
+                        anonymousPhotoUrl = firebaseUser.photoUrl?.toString()
                     )
                     ensureUserDocument(
                         uid = activatedAnonymous.id,
                         name = activatedAnonymous.name,
                         email = null,
-                        isAnonymous = true
+                        isAnonymous = true,
+                        photoUrl = activatedAnonymous.photoUrl
                     )
                     Result.success(activatedAnonymous)
                 } else {
@@ -48,6 +58,7 @@ class AuthRepositoryImpl(
                         registeredUserId = firebaseUser.uid,
                         registeredName = firebaseUser.displayName ?: firebaseUser.email?.substringBefore("@") ?: "User",
                         registeredEmail = firebaseUser.email,
+                        registeredPhotoUrl = firebaseUser.photoUrl?.toString(),
                         mergeAnonymousData = false
                     )
                     Result.success(resolvedUser)
@@ -89,6 +100,34 @@ class AuthRepositoryImpl(
         }
     }
 
+    override suspend fun getUserPhotoUrl(userId: String): Result<String?> {
+        return try {
+            if (userId.isBlank()) return Result.success(null)
+
+            val local = authSessionStore.getUserById(userId)
+            if (local != null && !local.isDeleted && !local.photoUrl.isNullOrBlank()) {
+                return Result.success(local.photoUrl)
+            }
+
+            val currentUid = firebaseAuth.currentUser?.uid
+            if (currentUid == null || currentUid != userId) {
+                return Result.success(null)
+            }
+
+            val remotePhotoUrl = runCatching {
+                firestore.collection("users")
+                    .document(userId)
+                    .get()
+                    .awaitTaskResult()
+                    .getString("photoUrl")
+            }.getOrNull()
+
+            Result.success(remotePhotoUrl?.takeIf { it.isNotBlank() })
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     override suspend fun getOrCreateAnonymousUser(defaultName: String): Result<User> {
         return try {
             val firebaseUser = firebaseAuth.currentUser
@@ -107,7 +146,8 @@ class AuthRepositoryImpl(
             val resolvedName = (anonymousFirebaseUser.displayName ?: defaultName).ifBlank { "Guest" }
             val anonymousUser = authSessionStore.activateAnonymousUserSession(
                 anonymousUserId = anonymousFirebaseUser.uid,
-                anonymousName = resolvedName
+                anonymousName = resolvedName,
+                anonymousPhotoUrl = anonymousFirebaseUser.photoUrl?.toString()
             )
 
             // Wait to ensure auth session is established
@@ -120,6 +160,7 @@ class AuthRepositoryImpl(
             val payload = mapOf(
                 "name" to anonymousUser.name,
                 "email" to null,
+                "photoUrl" to anonymousUser.photoUrl,
                 "isAnonymous" to true,
                 "lastSeen" to System.currentTimeMillis()
             )
@@ -151,7 +192,11 @@ override suspend fun signUpWithEmail(
             ensureUserDocument(user.uid, name.trim(), user.email, false)
 
             val mergedUser = authSessionStore.activateRegisteredUserAfterAuthentication(
-                user.uid, user.displayName ?: name.trim(), user.email, mergeAnonymousData
+                user.uid,
+                user.displayName ?: name.trim(),
+                user.email,
+                user.photoUrl?.toString(),
+                mergeAnonymousData
             )
 
             // 2. Perform Migration & Invalidate
@@ -170,10 +215,20 @@ override suspend fun signUpWithEmail(
             val authResult = firebaseAuth.signInWithEmailAndPassword(email.trim(), password).awaitTaskResult()
             val user = authResult.user ?: return Result.failure(IllegalStateException("No user"))
 
-            ensureUserDocument(user.uid, user.displayName ?: "User", user.email, false)
+            ensureUserDocument(
+                user.uid,
+                user.displayName ?: "User",
+                user.email,
+                false,
+                user.photoUrl?.toString()
+            )
 
             val mergedUser = authSessionStore.activateRegisteredUserAfterAuthentication(
-                user.uid, user.displayName ?: "User", user.email, mergeAnonymousData
+                user.uid,
+                user.displayName ?: "User",
+                user.email,
+                user.photoUrl?.toString(),
+                mergeAnonymousData
             )
 
             handleDataMigration(oldState, user.uid, mergeAnonymousData)
@@ -192,10 +247,20 @@ override suspend fun signUpWithEmail(
             val authResult = firebaseAuth.signInWithCredential(credential).awaitTaskResult()
             val user = authResult.user ?: return Result.failure(IllegalStateException("No user"))
 
-            ensureUserDocument(user.uid, user.displayName ?: "User", user.email, false)
+            ensureUserDocument(
+                user.uid,
+                user.displayName ?: "User",
+                user.email,
+                false,
+                user.photoUrl?.toString()
+            )
 
             val mergedUser = authSessionStore.activateRegisteredUserAfterAuthentication(
-                user.uid, user.displayName ?: "User", user.email, mergeAnonymousData
+                user.uid,
+                user.displayName ?: "User",
+                user.email,
+                user.photoUrl?.toString(),
+                mergeAnonymousData
             )
 
             handleDataMigration(oldState, user.uid, mergeAnonymousData)
@@ -239,16 +304,44 @@ override suspend fun signUpWithEmail(
         }
     }
 
+    override suspend fun updateProfilePhoto(imageBytes: ByteArray): Result<User> {
+        return runCatching {
+            val firebaseUser = firebaseAuth.currentUser
+                ?: throw IllegalStateException("No signed-in user")
+
+            val uploadedPhotoUrl = uploadProfileImage(imageBytes)
+
+            firebaseUser.updateProfile(
+                UserProfileChangeRequest.Builder()
+                    .setPhotoUri(Uri.parse(uploadedPhotoUrl))
+                    .build()
+            ).awaitTaskResult()
+
+            ensureUserDocument(
+                uid = firebaseUser.uid,
+                name = firebaseUser.displayName ?: firebaseUser.email?.substringBefore("@") ?: "User",
+                email = firebaseUser.email,
+                isAnonymous = firebaseUser.isAnonymous,
+                photoUrl = uploadedPhotoUrl
+            )
+
+            authSessionStore.updateUserPhotoUrl(firebaseUser.uid, uploadedPhotoUrl)
+                ?: firebaseUser.toDomainUser().copy(photoUrl = uploadedPhotoUrl)
+        }
+    }
+
     private suspend fun ensureUserDocument(
         uid: String,
         name: String,
         email: String?,
-        isAnonymous: Boolean
+        isAnonymous: Boolean,
+        photoUrl: String? = null
     ) {
         val now = System.currentTimeMillis()
         val payload = mapOf(
             "name" to name,
             "email" to email,
+            "photoUrl" to photoUrl,
             "isAnonymous" to isAnonymous,
             "lastSeen" to now
         )
@@ -349,8 +442,61 @@ override suspend fun signUpWithEmail(
             isAnonymous = isAnonymous,
             isDeleted = false,
             lastSeen = metadata?.lastSignInTimestamp ?: System.currentTimeMillis(),
-            groups = emptyList()
+            groups = emptyList(),
+            photoUrl = photoUrl?.toString()
         )
+    }
+
+    private suspend fun uploadProfileImage(imageBytes: ByteArray): String {
+        val baseUrl = BuildConfig.SUPABASE_UPLOAD_URL.trim().trimEnd('/')
+        if (baseUrl.isBlank()) {
+            throw IllegalStateException("SUPABASE_UPLOAD_URL is not configured")
+        }
+
+        val payload = JSONObject().apply {
+            put("imageBase64", Base64.encodeToString(imageBytes, Base64.NO_WRAP))
+        }
+
+        return uploadProfileImageViaHttp(
+            endpointUrl = "$baseUrl/profile-images/upload",
+            payload = payload
+        )
+    }
+
+    private suspend fun uploadProfileImageViaHttp(
+        endpointUrl: String,
+        payload: JSONObject
+    ): String = withContext(Dispatchers.IO) {
+        val connection = (URL(endpointUrl).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 15000
+            readTimeout = 45000
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Accept", "application/json")
+        }
+
+        try {
+            connection.outputStream.use { it.write(payload.toString().toByteArray()) }
+            val status = connection.responseCode
+            val body = runCatching {
+                val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+                stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            }.getOrDefault("")
+
+            if (status !in 200..299) {
+                throw IllegalStateException("Profile image upload failed (HTTP $status): $body")
+            }
+
+            val response = JSONObject(body)
+            val imageUrl = response.optString("imageUrl")
+            if (imageUrl.isBlank()) {
+                throw IllegalStateException("Profile image upload endpoint did not return imageUrl")
+            }
+            imageUrl
+        } finally {
+            connection.disconnect()
+        }
     }
 
     private suspend fun reassignAnonymousToRegisteredUserInFirestore(

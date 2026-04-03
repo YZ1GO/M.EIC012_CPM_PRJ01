@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.group-images]
 verify_jwt = false
+
+[functions.profile-images]
+verify_jwt = false

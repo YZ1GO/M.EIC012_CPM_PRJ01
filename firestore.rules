@@ -70,13 +70,14 @@ service cloud.firestore {
 
         // validate user document fields and ownership
         function validUserPayload(userId) {
-            return request.resource.data.keys().hasOnly(['name', 'email', 'isAnonymous', 'lastSeen']) &&
+            return request.resource.data.keys().hasOnly(['name', 'email', 'photoUrl', 'isAnonymous', 'lastSeen']) &&
                 request.resource.data.name is string &&
                 request.resource.data.lastSeen is int &&
                 request.resource.data.isAnonymous is bool &&
                 request.resource.data.name.size() > 0 &&
                 request.resource.data.name.size() <= 100 &&
                 (!('email' in request.resource.data) || request.resource.data.email == null || request.resource.data.email is string) &&
+                (!('photoUrl' in request.resource.data) || request.resource.data.photoUrl == null || (request.resource.data.photoUrl is string && request.resource.data.photoUrl.size() <= 2000)) &&
                 request.auth.uid == userId;
         }
 

@@ -16,6 +16,8 @@ class ProfileViewModel(
     private val repository: IAuthRepository
 ) : ViewModel() {
 
+    private var selectedPhotoBytes: ByteArray? = null
+
     private val limits = repository.getAnonymousLimits()
 
     private val _uiState = MutableStateFlow(
@@ -76,7 +78,59 @@ class ProfileViewModel(
         }
     }
 
+    fun onProfilePhotoSelected(uri: String?, imageBytes: ByteArray?) {
+        selectedPhotoBytes = imageBytes
+        _uiState.update {
+            it.copy(
+                pendingPhotoUri = uri,
+                errorMessage = null
+            )
+        }
+    }
+
+    fun onSaveProfilePhotoClicked() {
+        val imageBytes = selectedPhotoBytes
+        if (imageBytes == null) {
+            _uiState.update { it.copy(errorMessage = "Please choose a photo first") }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isUploadingPhoto = true,
+                    errorMessage = null
+                )
+            }
+
+            repository.updateProfilePhoto(imageBytes)
+                .onSuccess { updatedUser ->
+                    selectedPhotoBytes = null
+                    _uiState.update {
+                        it.copy(
+                            isUploadingPhoto = false,
+                            pendingPhotoUri = null,
+                            currentUser = updatedUser,
+                            errorMessage = null
+                        )
+                    }
+                    _uiEffect.emit(ProfileUiEffect.ProfilePhotoSaved)
+                }
+                .onFailure { error ->
+                    val message = error.message ?: "Could not update profile photo"
+                    _uiState.update {
+                        it.copy(
+                            isUploadingPhoto = false,
+                            errorMessage = message
+                        )
+                    }
+                    _uiEffect.emit(ProfileUiEffect.ShowMessage(message))
+                }
+        }
+    }
+
     fun onSignOutClicked() {
+        if (_uiState.value.isUploadingPhoto) return
         viewModelScope.launch {
             _uiState.update { it.copy(isBusy = true, errorMessage = null) }
             repository.signOut()

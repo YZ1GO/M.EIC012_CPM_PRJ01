@@ -106,6 +106,7 @@ class AuthSessionStore(context: Context) {
         registeredUserId: String,
         registeredName: String,
         registeredEmail: String?,
+        registeredPhotoUrl: String? = null,
         mergeAnonymousData: Boolean
     ): User {
         return database.withTransaction {
@@ -119,6 +120,7 @@ class AuthSessionStore(context: Context) {
                         id = registeredUserId,
                         name = registeredName,
                         email = registeredEmail,
+                        photoUrl = registeredPhotoUrl,
                         isAnonymous = false,
                         isDeleted = false,
                         isSessionActive = true,
@@ -130,6 +132,7 @@ class AuthSessionStore(context: Context) {
                     existingRegistered.copy(
                         name = registeredName,
                         email = registeredEmail,
+                        photoUrl = registeredPhotoUrl,
                         isAnonymous = false,
                         isDeleted = false,
                         isSessionActive = true,
@@ -191,7 +194,8 @@ class AuthSessionStore(context: Context) {
 
     suspend fun activateAnonymousUserSession(
         anonymousUserId: String,
-        anonymousName: String = "Guest"
+        anonymousName: String = "Guest",
+        anonymousPhotoUrl: String? = null
     ): User {
         return database.withTransaction {
             val now = System.currentTimeMillis()
@@ -203,6 +207,7 @@ class AuthSessionStore(context: Context) {
                         id = anonymousUserId,
                         name = anonymousName,
                         email = null,
+                        photoUrl = anonymousPhotoUrl,
                         isAnonymous = true,
                         isDeleted = false,
                         isSessionActive = true,
@@ -214,6 +219,7 @@ class AuthSessionStore(context: Context) {
                     existingAnonymous.copy(
                         name = existingAnonymous.name.ifBlank { anonymousName },
                         email = null,
+                        photoUrl = anonymousPhotoUrl,
                         isAnonymous = true,
                         isDeleted = false,
                         isSessionActive = true,
@@ -248,8 +254,22 @@ class AuthSessionStore(context: Context) {
             isAnonymous = isAnonymous,
             isDeleted = isDeleted,
             lastSeen = lastSeen,
-            groups = userGroups
+            groups = userGroups,
+            photoUrl = photoUrl
         )
+    }
+
+    suspend fun updateUserPhotoUrl(userId: String, photoUrl: String?): User? {
+        return database.withTransaction {
+            val user = userDao.getUserById(userId) ?: return@withTransaction null
+            userDao.updateUser(
+                user.copy(
+                    photoUrl = photoUrl,
+                    lastSeen = System.currentTimeMillis()
+                )
+            )
+            userDao.getUserById(userId)?.toDomain()
+        }
     }
 
     fun observeActiveUser(): Flow<User?> {
