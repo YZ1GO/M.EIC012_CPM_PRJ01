@@ -78,8 +78,14 @@ sealed class NavScreen(val route: String, val title: String, val icon: ImageVect
         fun createRoute(joinCode: String? = null): String =
             if (joinCode.isNullOrBlank()) "join_group" else "join_group?joinCode=${Uri.encode(joinCode)}"
     }
-    object AddExpense : NavScreen("add_expense/{groupId}", "Add Expense") {
-        fun createRoute(groupId: String): String = "add_expense/$groupId"
+    object AddExpense : NavScreen("add_expense/{groupId}?expenseId={expenseId}", "Add Expense") {
+        fun createRoute(groupId: String, expenseId: String? = null): String {
+            return if (expenseId.isNullOrBlank()) {
+                "add_expense/$groupId"
+            } else {
+                "add_expense/$groupId?expenseId=${Uri.encode(expenseId)}"
+            }
+        }
     }
     object GroupDetails : NavScreen("group_details/{groupId}", "Group Details") {
         fun createRoute(groupId: String): String = "group_details/$groupId"
@@ -302,7 +308,9 @@ fun MainScreen(
                     MinimalistTopBar { navController.popBackStack() }
                     GroupDetailsScreen(
                         viewModel = vm, 
-                        onAddExpenseClick = { navController.navigate(NavScreen.AddExpense.createRoute(it)) }, 
+                        onAddExpenseClick = { groupId, expenseId ->
+                            navController.navigate(NavScreen.AddExpense.createRoute(groupId, expenseId))
+                        }, 
                         onGroupDeleted = { groupsSessionKey++; navController.navigate(NavScreen.Groups.route) { popUpTo(navController.graph.startDestinationId); launchSingleTop = true } }
                     )
                 }
@@ -310,10 +318,30 @@ fun MainScreen(
 
             composable(
                 route = NavScreen.AddExpense.route, 
-                arguments = listOf(navArgument("groupId") { type = NavType.StringType })
+                arguments = listOf(
+                    navArgument("groupId") { type = NavType.StringType },
+                    navArgument("expenseId") { type = NavType.StringType; nullable = true }
+                )
             ) { backStackEntry ->
                 val id = backStackEntry.arguments?.getString("groupId") ?: return@composable
-                val vm: AddExpenseViewModel = viewModel(factory = viewModelFactory { initializer { AddExpenseViewModel(authRepository, scannerRepository, GetAddExpenseMembersUseCase(groupRepository), RequestCreateExpenseUseCase(expenseRepository), id) } })
+                val expenseId = backStackEntry.arguments?.getString("expenseId")
+                val vm: AddExpenseViewModel = viewModel(
+                    key = "add_expense_${id}_${expenseId.orEmpty()}",
+                    factory = viewModelFactory {
+                        initializer {
+                            AddExpenseViewModel(
+                                authRepository = authRepository,
+                                scannerRepository = scannerRepository,
+                                getAddExpenseMembersUseCase = GetAddExpenseMembersUseCase(groupRepository),
+                                requestCreateExpenseUseCase = RequestCreateExpenseUseCase(expenseRepository),
+                                requestUpdateExpenseUseCase = RequestUpdateExpenseUseCase(expenseRepository),
+                                getEditableExpenseUseCase = GetEditableExpenseUseCase(expenseRepository),
+                                groupId = id,
+                                editingExpenseId = expenseId
+                            )
+                        }
+                    }
+                )
                 Column(Modifier.fillMaxSize()) {
                     MinimalistTopBar { navController.popBackStack() }
                     AddExpenseScreen(vm) { navController.popBackStack() }

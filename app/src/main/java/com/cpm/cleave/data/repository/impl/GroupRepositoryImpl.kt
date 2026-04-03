@@ -58,6 +58,11 @@ class GroupRepositoryImpl(
     private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
 ) : IGroupRepository {
 
+    private data class RemoteGroupsFetchResult(
+        val groups: List<Group>,
+        val isAuthoritative: Boolean
+    )
+
     @OptIn(ExperimentalCoroutinesApi::class)
     override fun observeGroups(): Flow<List<Group>> = authSessionStore.observeActiveUser()
         .distinctUntilChanged { old, new -> old?.id == new?.id }
@@ -587,22 +592,25 @@ class GroupRepositoryImpl(
             reconcileDeletedRemoteGroups(localGroups)
 
             val remoteResult = runCatching {
-                val remoteGroups = withTimeoutOrNull(4000L) {
+                val remoteFetch = withTimeoutOrNull(4000L) {
                     fetchGroupsFromRemote(
                         userId = effectiveUserId,
                         knownLocalGroupIds = localGroups.map { it.id }
                     )
                 } ?: throw IllegalStateException("Remote groups fetch timed out")
+                val remoteGroups = remoteFetch.groups
 
                 remoteGroups.forEach { cache.upsertGroupWithMembers(it) }
 
                 // Authoritative prune: on successful remote fetch, keep only groups that still
                 // exist in the remote user scope. If remote is empty, all local user groups are removed.
-                val remoteGroupIds = remoteGroups.map { it.id }.toSet()
-                localGroups.forEach { localGroup ->
-                    if (localGroup.id !in remoteGroupIds) {
-                        pendingSyncStore.removePendingGroupSync(localGroup.id)
-                        cache.deleteGroupById(localGroup.id)
+                if (remoteFetch.isAuthoritative) {
+                    val remoteGroupIds = remoteGroups.map { it.id }.toSet()
+                    localGroups.forEach { localGroup ->
+                        if (localGroup.id !in remoteGroupIds) {
+                            pendingSyncStore.removePendingGroupSync(localGroup.id)
+                            cache.deleteGroupById(localGroup.id)
+                        }
                     }
                 }
 
@@ -614,12 +622,13 @@ class GroupRepositoryImpl(
                 // Sign-out/sign-in can briefly race auth + rules propagation and return PERMISSION_DENIED.
                 // Retry once after a short delay before falling back to local cache.
                 delay(900)
-                val retriedRemoteGroups = withTimeoutOrNull(4000L) {
+                val retriedRemoteFetch = withTimeoutOrNull(4000L) {
                     fetchGroupsFromRemote(
                         userId = effectiveUserId,
                         knownLocalGroupIds = localGroups.map { it.id }
                     )
                 } ?: throw IllegalStateException("Remote groups fetch timed out")
+                val retriedRemoteGroups = retriedRemoteFetch.groups
 
                 retriedRemoteGroups.forEach { cache.upsertGroupWithMembers(it) }
                 warmExpensesCache(retriedRemoteGroups.map { it.id })
@@ -825,16 +834,17 @@ class GroupRepositoryImpl(
     private suspend fun fetchGroupsFromRemote(
         userId: String,
         knownLocalGroupIds: List<String> = emptyList()
-    ): List<Group> {
+    ): RemoteGroupsFetchResult {
         data class RemoteGroupPayload(
             val group: Group,
             val updatedAt: Long
         )
 
         val discoveredGroupIds = mutableSetOf<String>()
+        var isAuthoritative = true
 
         // Membership discovery by userId field.
-        runCatching {
+        val membershipDiscoveryResult = runCatching {
             val membershipSnapshot = firestore.collectionGroup("members")
                 .whereEqualTo("userId", userId)
                 .get()
@@ -843,6 +853,9 @@ class GroupRepositoryImpl(
                 .mapNotNull { document -> document.reference.parent.parent?.id }
             discoveredGroupIds.addAll(idsFromMembership)
         }
+        if (membershipDiscoveryResult.isFailure) {
+            isAuthoritative = false
+        }
 
         // Reconcile known local groups via direct membership doc checks.
         knownLocalGroupIds.forEach { groupId ->
@@ -850,6 +863,7 @@ class GroupRepositoryImpl(
                 val isMember = runCatching {
                     remoteGroupHasMember(groupId, userId)
                 }.getOrElse { error ->
+                    isAuthoritative = false
                     // A deleted/forbidden group can return PERMISSION_DENIED here.
                     // Do not abort the full fetch; simply treat it as non-membership.
                     if (error is com.google.firebase.firestore.FirebaseFirestoreException &&
@@ -869,7 +883,7 @@ class GroupRepositoryImpl(
 
         val groupIds = discoveredGroupIds.toList()
 
-        return groupIds.mapNotNull { groupId ->
+        val groups = groupIds.mapNotNull { groupId ->
             val groupSnapshot = firestore.collection("groups")
                 .document(groupId)
                 .get()
@@ -907,6 +921,11 @@ class GroupRepositoryImpl(
         }
             .sortedByDescending { it.updatedAt }
             .map { it.group }
+
+        return RemoteGroupsFetchResult(
+            groups = groups,
+            isAuthoritative = isAuthoritative
+        )
     }
 
     private fun readUpdatedAtMillis(snapshot: com.google.firebase.firestore.DocumentSnapshot): Long {

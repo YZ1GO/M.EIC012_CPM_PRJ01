@@ -202,7 +202,7 @@ fun GroupListItem(group: Group, onClick: () -> Unit) {
 @Composable
 fun GroupDetailsScreen(
     viewModel: GroupDetailsViewModel,
-    onAddExpenseClick: (String) -> Unit,
+    onAddExpenseClick: (String, String?) -> Unit,
     onGroupDeleted: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -532,6 +532,7 @@ fun GroupDetailsScreen(
                     ExpenseDetailsItem(
                         expense = expense,
                         userDisplayNames = uiState.userDisplayNames,
+                        onClick = { onAddExpenseClick(currentGroup.id, expense.id) },
                         onLongPress = if (uiState.canDeleteGroup) {
                             { viewModel.onExpenseLongPressed(expense.id) }
                         } else {
@@ -620,7 +621,7 @@ fun GroupDetailsScreen(
         Spacer(modifier = Modifier.height(sectionSpacing))
 
         Button(
-            onClick = { onAddExpenseClick(currentGroup.id) },
+            onClick = { onAddExpenseClick(currentGroup.id, null) },
             colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primary),
             shape = RoundedCornerShape(8.dp),
             modifier = Modifier
@@ -731,6 +732,7 @@ private fun generateQrBitmap(content: String, size: Int): Bitmap? {
 private fun ExpenseDetailsItem(
     expense: Expense,
     userDisplayNames: Map<String, String>,
+    onClick: (() -> Unit)? = null,
     onLongPress: (() -> Unit)? = null,
     onViewReceipt: (String) -> Unit
 ) {
@@ -751,9 +753,16 @@ private fun ExpenseDetailsItem(
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
             .then(
-                if (onLongPress != null) {
+                if (onClick != null || onLongPress != null) {
                     Modifier.pointerInput(onLongPress) {
-                        detectTapGestures(onLongPress = { onLongPress() })
+                        detectTapGestures(
+                            onTap = {
+                                onClick?.invoke()
+                            },
+                            onLongPress = {
+                                onLongPress?.invoke()
+                            }
+                        )
                     }
                 } else {
                     Modifier

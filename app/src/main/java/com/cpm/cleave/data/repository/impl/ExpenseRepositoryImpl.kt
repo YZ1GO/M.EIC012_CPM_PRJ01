@@ -63,10 +63,16 @@ class ExpenseRepositoryImpl(
         val amount: Double,
         val description: String,
         val date: Long,
+        val mutationTimestamp: Long,
         val splitMemberIds: List<String>,
         val payerContributions: Map<String, Double>,
         val imagePath: String?,
         val receiptItems: List<ReceiptItem>
+    )
+
+    private data class RemoteExpenseVersion(
+        val exists: Boolean,
+        val updatedAt: Long?
     )
 
     private val localExpenseRefreshEvents = MutableSharedFlow<String>(extraBufferCapacity = 64)
@@ -299,6 +305,7 @@ class ExpenseRepositoryImpl(
 
             val expenseId = UUID.randomUUID().toString()
             val now = System.currentTimeMillis()
+            val mutationTimestamp = now
             val receiptImagePath = if (receiptImageBytes != null) {
                 val localPath = persistReceiptLocally(expenseId, receiptImageBytes)
                 if (!connectivityStatus.isNetworkAvailable()) {
@@ -338,6 +345,7 @@ class ExpenseRepositoryImpl(
                 amount = amount,
                 description = description,
                 date = now,
+                mutationTimestamp = mutationTimestamp,
                 splitMemberIds = splitMemberIds,
                 payerContributions = normalizedContributions,
                 imagePath = receiptImagePath,
@@ -360,6 +368,115 @@ class ExpenseRepositoryImpl(
                         amount = amount,
                         description = description,
                         date = now,
+                        mutationTimestamp = mutationTimestamp,
+                        splitMemberIds = splitMemberIds,
+                        payerContributions = normalizedContributions,
+                        imagePath = receiptImagePath.takeUnless { it.isLocalReceiptPath() },
+                        receiptItems = receiptItems
+                    )
+                    true
+                } ?: false
+            }.getOrDefault(false)
+
+            if (syncSucceeded) {
+                pendingSyncStore.removePendingExpenseSync(groupId, expenseId)
+            } else {
+                pendingSyncStore.addPendingExpenseSync(groupId, expenseId)
+                pendingSyncStore.setPendingExpenseSyncPayload(groupId, expenseId, pendingPayloadJson)
+            }
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun updateExpense(
+        groupId: String,
+        expenseId: String,
+        amount: Double,
+        description: String,
+        splitMemberIds: List<String>,
+        payerContributions: Map<String, Double>,
+        receiptImageBytes: ByteArray?,
+        receiptItems: List<ReceiptItem>
+    ): Result<Unit> {
+        return try {
+            val existingExpense = cache.getExpenseById(expenseId)
+                ?: return Result.failure(IllegalArgumentException("Expense not found"))
+
+            val normalizedContributions = payerContributions
+                .filterValues { it > 0.0 }
+            if (normalizedContributions.isEmpty()) {
+                return Result.failure(IllegalArgumentException("Expense must have at least one payer"))
+            }
+
+            val now = System.currentTimeMillis()
+            val mutationTimestamp = now
+
+            val receiptImagePath = if (receiptImageBytes != null) {
+                val localPath = persistReceiptLocally(expenseId, receiptImageBytes)
+                if (!connectivityStatus.isNetworkAvailable()) {
+                    localPath
+                } else {
+                    runCatching {
+                        uploadReceiptImage(
+                            groupId = groupId,
+                            expenseId = expenseId,
+                            imageBytes = receiptImageBytes
+                        )
+                    }.getOrElse { error ->
+                        Log.w(
+                            "ExpenseRepo",
+                            "Receipt upload failed; keeping local receipt for deferred sync: ${error.message}"
+                        )
+                        localPath
+                    }
+                }
+            } else {
+                existingExpense.imagePath
+            }
+
+            cache.insertExpenseWithSplit(
+                expenseId = expenseId,
+                amount = amount,
+                description = description,
+                date = now,
+                groupId = groupId,
+                payerContributions = normalizedContributions,
+                memberIds = splitMemberIds,
+                imagePath = receiptImagePath,
+                receiptItems = receiptItems
+            )
+
+            val pendingPayloadJson = buildPendingExpensePayloadJson(
+                amount = amount,
+                description = description,
+                date = now,
+                mutationTimestamp = mutationTimestamp,
+                splitMemberIds = splitMemberIds,
+                payerContributions = normalizedContributions,
+                imagePath = receiptImagePath,
+                receiptItems = receiptItems
+            )
+
+            localExpenseRefreshEvents.tryEmit(groupId)
+
+            if (!connectivityStatus.isNetworkAvailable()) {
+                pendingSyncStore.addPendingExpenseSync(groupId, expenseId)
+                pendingSyncStore.setPendingExpenseSyncPayload(groupId, expenseId, pendingPayloadJson)
+                return Result.success(Unit)
+            }
+
+            val syncSucceeded = runCatching {
+                withTimeoutOrNull(4000L) {
+                    syncExpenseToRemote(
+                        expenseId = expenseId,
+                        groupId = groupId,
+                        amount = amount,
+                        description = description,
+                        date = now,
+                        mutationTimestamp = mutationTimestamp,
                         splitMemberIds = splitMemberIds,
                         payerContributions = normalizedContributions,
                         imagePath = receiptImagePath.takeUnless { it.isLocalReceiptPath() },
@@ -405,34 +522,66 @@ class ExpenseRepositoryImpl(
 
         pendingSyncStore.getPendingExpenseSyncs().forEach { pending ->
             val localExpense = cache.getExpenseById(pending.expenseId)
-            val payload = if (localExpense == null) {
-                pendingSyncStore.getPendingExpenseSyncPayload(pending.groupId, pending.expenseId)
-                    ?.let { decodePendingExpensePayloadJson(it) }
-            } else {
-                null
-            }
+            val payload = pendingSyncStore.getPendingExpenseSyncPayload(pending.groupId, pending.expenseId)
+                ?.let { decodePendingExpensePayloadJson(it) }
+            val preferPayload = payload != null
 
             if (localExpense == null && payload == null) {
                 // Keep pending. Without a local row or payload snapshot we cannot safely sync yet.
                 return@forEach
             }
 
-            val syncExpenseId = localExpense?.id ?: pending.expenseId
-            val syncAmount = localExpense?.amount ?: payload!!.amount
-            val syncDescription = localExpense?.description ?: payload!!.description
-            val syncDate = localExpense?.date ?: payload!!.date
-            val syncSplitMemberIds = localExpense
-                ?.let { expense -> cache.getExpenseSharesForExpense(expense.id).map { it.userId } }
-                ?: payload!!.splitMemberIds
-            val syncPayerContributions = localExpense
-                ?.payerContributions
-                ?.ifEmpty {
-                    listOf(PayerContribution(userId = localExpense.paidByUserId, amount = localExpense.amount))
+            val remoteVersion = runCatching {
+                withTimeoutOrNull(2500L) {
+                    fetchRemoteExpenseVersion(
+                        groupId = pending.groupId,
+                        expenseId = pending.expenseId
+                    )
                 }
-                ?.associate { it.userId to it.amount }
-                ?: payload!!.payerContributions
-            val syncReceiptItems = localExpense?.receiptItems ?: payload!!.receiptItems
-            val sourceImagePath = localExpense?.imagePath ?: payload!!.imagePath
+            }.getOrNull()
+
+            val mutationTimestamp = payload?.mutationTimestamp ?: 0L
+            val remoteUpdatedAt = remoteVersion?.updatedAt
+            val hasRemoteNewerState =
+                mutationTimestamp > 0L &&
+                    remoteVersion?.exists == true &&
+                    remoteUpdatedAt != null &&
+                    remoteUpdatedAt > mutationTimestamp
+
+            if (hasRemoteNewerState) {
+                pendingSyncStore.removePendingExpenseSync(pending.groupId, pending.expenseId)
+                return@forEach
+            }
+
+            val syncExpenseId = pending.expenseId
+            val syncAmount = if (preferPayload) payload!!.amount else localExpense?.amount ?: payload!!.amount
+            val syncDescription = if (preferPayload) payload!!.description else localExpense?.description ?: payload!!.description
+            val syncDate = if (preferPayload) payload!!.date else localExpense?.date ?: payload!!.date
+            val syncMutationTimestamp = if (preferPayload) {
+                payload!!.mutationTimestamp.takeIf { it > 0L } ?: payload.date
+            } else {
+                payload?.mutationTimestamp?.takeIf { it > 0L } ?: syncDate
+            }
+            val syncSplitMemberIds = if (preferPayload) {
+                payload!!.splitMemberIds
+            } else {
+                localExpense
+                    ?.let { expense -> cache.getExpenseSharesForExpense(expense.id).map { it.userId } }
+                    ?: payload!!.splitMemberIds
+            }
+            val syncPayerContributions = if (preferPayload) {
+                payload!!.payerContributions
+            } else {
+                localExpense
+                    ?.payerContributions
+                    ?.ifEmpty {
+                        listOf(PayerContribution(userId = localExpense.paidByUserId, amount = localExpense.amount))
+                    }
+                    ?.associate { it.userId to it.amount }
+                    ?: payload!!.payerContributions
+            }
+            val syncReceiptItems = if (preferPayload) payload!!.receiptItems else localExpense?.receiptItems ?: payload!!.receiptItems
+            val sourceImagePath = payload?.imagePath ?: localExpense?.imagePath
 
             val syncedImagePath = resolveImagePathForSync(
                 groupId = pending.groupId,
@@ -448,6 +597,7 @@ class ExpenseRepositoryImpl(
                         amount = syncAmount,
                         description = syncDescription,
                         date = syncDate,
+                        mutationTimestamp = syncMutationTimestamp,
                         splitMemberIds = syncSplitMemberIds,
                         payerContributions = syncPayerContributions,
                         imagePath = syncedImagePath,
@@ -533,6 +683,7 @@ class ExpenseRepositoryImpl(
         amount: Double,
         description: String,
         date: Long,
+        mutationTimestamp: Long,
         splitMemberIds: List<String>,
         payerContributions: Map<String, Double>,
         imagePath: String?,
@@ -561,7 +712,7 @@ class ExpenseRepositoryImpl(
                         "unitPrice" to item.unitPrice
                     )
                 },
-                "updatedAt" to now
+                "updatedAt" to mutationTimestamp
             ),
             SetOptions.merge()
         )
@@ -759,6 +910,7 @@ class ExpenseRepositoryImpl(
         amount: Double,
         description: String,
         date: Long,
+        mutationTimestamp: Long,
         splitMemberIds: List<String>,
         payerContributions: Map<String, Double>,
         imagePath: String?,
@@ -768,6 +920,7 @@ class ExpenseRepositoryImpl(
             put("amount", amount)
             put("description", description)
             put("date", date)
+            put("mutationTimestamp", mutationTimestamp)
             put("splitMemberIds", JSONArray().apply {
                 splitMemberIds.forEach { memberId -> put(memberId) }
             })
@@ -834,12 +987,44 @@ class ExpenseRepositoryImpl(
                 amount = json.optDouble("amount", 0.0),
                 description = json.optString("description"),
                 date = json.optLong("date", 0L),
+                mutationTimestamp = json.optLong("mutationTimestamp", 0L),
                 splitMemberIds = splitMemberIds,
                 payerContributions = payerContributions,
                 imagePath = json.optString("imagePath").takeIf { it.isNotBlank() },
                 receiptItems = receiptItems
             )
         }.getOrNull()
+    }
+
+    private suspend fun fetchRemoteExpenseVersion(
+        groupId: String,
+        expenseId: String
+    ): RemoteExpenseVersion {
+        val snapshot = firestore.collection("groups")
+            .document(groupId)
+            .collection("expenses")
+            .document(expenseId)
+            .get()
+            .awaitTaskResult()
+
+        if (!snapshot.exists()) {
+            return RemoteExpenseVersion(exists = false, updatedAt = null)
+        }
+
+        val rawUpdatedAt = snapshot.get("updatedAt")
+        val parsedUpdatedAt = when (rawUpdatedAt) {
+            is Number -> rawUpdatedAt.toLong()
+            is java.util.Date -> rawUpdatedAt.time
+            is com.google.firebase.Timestamp -> rawUpdatedAt.toDate().time
+            is Map<*, *> -> {
+                val seconds = (rawUpdatedAt["seconds"] as? Number)?.toLong() ?: 0L
+                val nanos = (rawUpdatedAt["nanoseconds"] as? Number)?.toLong() ?: 0L
+                (seconds * 1000L) + (nanos / 1_000_000L)
+            }
+            else -> null
+        }
+
+        return RemoteExpenseVersion(exists = true, updatedAt = parsedUpdatedAt)
     }
 
     private fun decodeReceiptItemsField(raw: Any?): List<ReceiptItem> {
