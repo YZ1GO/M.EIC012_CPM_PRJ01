@@ -100,13 +100,20 @@ class GroupRepositoryImpl(
                                 if (!groupDocRegistrations.containsKey(groupId)) {
                                     val listener = firestore.collection("groups")
                                         .document(groupId)
-                                        .addSnapshotListener { _, error ->
+                                        .addSnapshotListener { snapshot, error ->
+                                            if (snapshot != null && !snapshot.exists()) {
+                                                scope.launch { refreshAndEmit() }
+                                                return@addSnapshotListener
+                                            }
+
                                             if (error != null) {
                                                 if (error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
                                                     groupDocRegistrations[groupId]?.remove() // Safely stop the listener
                                                 }
+                                                scope.launch { refreshAndEmit() }
                                                 return@addSnapshotListener
                                             }
+
                                             scope.launch { refreshAndEmit() }
                                         }
                                     groupDocRegistrations[groupId] = listener
@@ -117,13 +124,20 @@ class GroupRepositoryImpl(
                                         .document(groupId)
                                         .collection("members")
                                         .document(userId)
-                                        .addSnapshotListener { _, error ->
+                                        .addSnapshotListener { snapshot, error ->
+                                            if (snapshot != null && !snapshot.exists()) {
+                                                scope.launch { refreshAndEmit() }
+                                                return@addSnapshotListener
+                                            }
+
                                             if (error != null) {
                                                 if (error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
                                                     memberDocRegistrations[groupId]?.remove() // Safely stop the listener
                                                 }
+                                                scope.launch { refreshAndEmit() }
                                                 return@addSnapshotListener
                                             }
+
                                             scope.launch { refreshAndEmit() }
                                         }
                                     memberDocRegistrations[groupId] = listener
@@ -133,13 +147,20 @@ class GroupRepositoryImpl(
                                     val listener = firestore.collection("groups")
                                         .document(groupId)
                                         .collection("members")
-                                        .addSnapshotListener { _, error ->
+                                        .addSnapshotListener { snapshot, error ->
+                                            if (snapshot != null && snapshot.isEmpty) {
+                                                scope.launch { refreshAndEmit() }
+                                                return@addSnapshotListener
+                                            }
+
                                             if (error != null) {
                                                 if (error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
                                                     membersCollectionRegistrations[groupId]?.remove() // Safely stop the listener
                                                 }
+                                                scope.launch { refreshAndEmit() }
                                                 return@addSnapshotListener
                                             }
+
                                             scope.launch { refreshAndEmit() }
                                         }
                                     membersCollectionRegistrations[groupId] = listener
@@ -577,23 +598,8 @@ class GroupRepositoryImpl(
                 val remoteGroupIds = remoteGroups.map { it.id }.toSet()
                 localGroups.forEach { localGroup ->
                     if (localGroup.id !in remoteGroupIds) {
-                        val isMemberRemotely = try {
-                            withTimeoutOrNull(1500L) {
-                                remoteGroupHasMember(localGroup.id, effectiveUserId)
-                            }
-                        } catch (e: Exception) {
-                            if (e is com.google.firebase.firestore.FirebaseFirestoreException && 
-                                e.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
-                                null
-                            } else {
-                                null
-                            }
-                        }
-
-                        if (isMemberRemotely == false) {
-                            pendingSyncStore.removePendingGroupSync(localGroup.id)
-                            cache.deleteGroupById(localGroup.id)
-                        }
+                        pendingSyncStore.removePendingGroupSync(localGroup.id)
+                        cache.deleteGroupById(localGroup.id)
                     }
                 }
 
@@ -832,8 +838,24 @@ class GroupRepositoryImpl(
 
         // Reconcile known local groups via direct membership doc checks.
         knownLocalGroupIds.forEach { groupId ->
-            if (groupId !in discoveredGroupIds && remoteGroupHasMember(groupId, userId)) {
-                discoveredGroupIds.add(groupId)
+            if (groupId !in discoveredGroupIds) {
+                val isMember = runCatching {
+                    remoteGroupHasMember(groupId, userId)
+                }.getOrElse { error ->
+                    // A deleted/forbidden group can return PERMISSION_DENIED here.
+                    // Do not abort the full fetch; simply treat it as non-membership.
+                    if (error is com.google.firebase.firestore.FirebaseFirestoreException &&
+                        error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED
+                    ) {
+                        false
+                    } else {
+                        false
+                    }
+                }
+
+                if (isMember) {
+                    discoveredGroupIds.add(groupId)
+                }
             }
         }
 

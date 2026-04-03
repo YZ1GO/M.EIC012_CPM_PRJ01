@@ -7,6 +7,8 @@ class GetAddExpenseMembersUseCase(
 ) {
     suspend fun execute(groupId: String): Result<List<String>> {
         return groupRepository.getGroupById(groupId)
-            .map { group -> group?.members ?: emptyList() }
+            .map { group ->
+                group?.members ?: throw IllegalArgumentException("Group not found.")
+            }
     }
 }

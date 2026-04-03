@@ -346,63 +346,84 @@ class AddExpenseViewModel(
         val state = _uiState.value
         if (state.isLoading) return
 
-        val amount = state.amountInput.toDoubleOrNull()
-
-        if (amount == null || amount <= 0.0) {
-            _uiState.update { it.copy(errorMessage = "Enter a valid amount") }
-            return
-        }
-
-        val payerContributions = mutableMapOf<String, Double>()
-        if (state.buyerMode == BuyerMode.SINGLE_BUYER) {
-            val primary = state.primaryBuyerId
-            if (primary.isBlank()) {
-                _uiState.update { it.copy(errorMessage = "Select a buyer") }
-                return
-            }
-            payerContributions[primary] = amount
-        } else {
-            if (state.selectedPayerIds.isEmpty()) {
-                _uiState.update { it.copy(errorMessage = "Select at least one payer") }
-                return
-            }
-
-            state.selectedPayerIds.forEach { payerId ->
-                val contribution = state.payerAmountInputs[payerId]?.toDoubleOrNull()
-                if (contribution == null || contribution <= 0.0) {
-                    _uiState.update { it.copy(errorMessage = "Enter valid contribution amounts for all selected payers") }
-                    return
-                }
-                payerContributions[payerId] = contribution
-            }
-
-            val contributionTotal = payerContributions.values.sum()
-            if (kotlin.math.abs(contributionTotal - amount) > 0.009) {
-                _uiState.update { it.copy(errorMessage = "Payer contributions must match total amount") }
-                return
-            }
-        }
-
-        val requiredPayers = if (state.buyerMode == BuyerMode.SINGLE_BUYER) {
-            setOf(state.primaryBuyerId)
-        } else {
-            state.selectedPayerIds
-        }
-
-        val splitMemberIds = if (state.splitMode == SplitMode.ALL_MEMBERS) {
-            state.availablePayers
-        } else {
-            (state.selectedSplitMemberIds + requiredPayers).toList()
-        }
-
-        if (splitMemberIds.isEmpty()) {
-            _uiState.update { it.copy(errorMessage = "Select at least one member to split with") }
-            return
-        }
-
-        _uiState.update { it.copy(isLoading = true) }
-
         viewModelScope.launch {
+            val freshMembersResult = getAddExpenseMembersUseCase.execute(groupId)
+            val freshMembers = freshMembersResult.getOrElse { error ->
+                _uiState.update { it.copy(isLoading = false, errorMessage = error.message ?: "Group not found") }
+                return@launch
+            }
+
+            val currentUserId = authRepository.getCurrentUser().getOrNull()?.id.orEmpty()
+            if (currentUserId.isBlank() || currentUserId !in freshMembers) {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = "This group is no longer available."
+                    )
+                }
+                return@launch
+            }
+
+            val amount = state.amountInput.toDoubleOrNull()
+
+            if (amount == null || amount <= 0.0) {
+                _uiState.update { it.copy(errorMessage = "Enter a valid amount") }
+                return@launch
+            }
+
+            val payerContributions = mutableMapOf<String, Double>()
+            if (state.buyerMode == BuyerMode.SINGLE_BUYER) {
+                val primary = state.primaryBuyerId
+                if (primary.isBlank() || primary !in freshMembers) {
+                    _uiState.update { it.copy(errorMessage = "Select a valid buyer") }
+                    return@launch
+                }
+                payerContributions[primary] = amount
+            } else {
+                if (state.selectedPayerIds.isEmpty()) {
+                    _uiState.update { it.copy(errorMessage = "Select at least one payer") }
+                    return@launch
+                }
+
+                state.selectedPayerIds.forEach { payerId ->
+                    if (payerId !in freshMembers) {
+                        _uiState.update { it.copy(errorMessage = "One of the selected payers is no longer in this group") }
+                        return@launch
+                    }
+
+                    val contribution = state.payerAmountInputs[payerId]?.toDoubleOrNull()
+                    if (contribution == null || contribution <= 0.0) {
+                        _uiState.update { it.copy(errorMessage = "Enter valid contribution amounts for all selected payers") }
+                        return@launch
+                    }
+                    payerContributions[payerId] = contribution
+                }
+
+                val contributionTotal = payerContributions.values.sum()
+                if (kotlin.math.abs(contributionTotal - amount) > 0.009) {
+                    _uiState.update { it.copy(errorMessage = "Payer contributions must match total amount") }
+                    return@launch
+                }
+            }
+
+            val requiredPayers = if (state.buyerMode == BuyerMode.SINGLE_BUYER) {
+                setOf(state.primaryBuyerId)
+            } else {
+                state.selectedPayerIds
+            }
+
+            val splitMemberIds = if (state.splitMode == SplitMode.ALL_MEMBERS) {
+                freshMembers
+            } else {
+                (state.selectedSplitMemberIds + requiredPayers).filter { it in freshMembers }
+            }
+
+            if (splitMemberIds.isEmpty()) {
+                _uiState.update { it.copy(errorMessage = "Select at least one member to split with") }
+                return@launch
+            }
+
+            _uiState.update { it.copy(isLoading = true) }
             requestCreateExpenseUseCase.execute(
                 groupId = groupId,
                 amount = amount,
