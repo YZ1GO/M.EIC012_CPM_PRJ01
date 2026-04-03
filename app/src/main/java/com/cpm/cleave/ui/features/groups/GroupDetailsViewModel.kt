@@ -6,6 +6,8 @@ import com.cpm.cleave.domain.usecase.GetGroupDetailsUseCase
 import com.cpm.cleave.domain.usecase.RequestDeleteExpenseUseCase
 import com.cpm.cleave.domain.usecase.RequestDeleteGroupUseCase
 import com.cpm.cleave.domain.usecase.RequestExpelGroupMemberUseCase
+import com.cpm.cleave.domain.usecase.RequestSettleDebtUseCase
+import com.cpm.cleave.model.Debt
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,6 +18,7 @@ import kotlinx.coroutines.launch
 class GroupDetailsViewModel(
     private val groupId: String,
     private val getGroupDetailsUseCase: GetGroupDetailsUseCase,
+    private val requestSettleDebtUseCase: RequestSettleDebtUseCase,
     private val requestDeleteExpenseUseCase: RequestDeleteExpenseUseCase,
     private val requestDeleteGroupUseCase: RequestDeleteGroupUseCase,
     private val requestExpelGroupMemberUseCase: RequestExpelGroupMemberUseCase
@@ -43,13 +46,18 @@ class GroupDetailsViewModel(
                     result
                         .onSuccess { data ->
                             _uiState.update {
-                                val preservedError = if (it.selectedMemberForExpulsionId != null) {
+                                val preservedError = if (
+                                    it.selectedMemberForExpulsionId != null ||
+                                    it.selectedExpenseForDeletionId != null ||
+                                    it.selectedDebtForPayment != null
+                                ) {
                                     it.errorMessage
                                 } else {
                                     null
                                 }
                                 it.copy(
                                     isLoading = false,
+                                    currentUserId = data.currentUserId,
                                     group = data.group,
                                     expenses = data.expenses,
                                     debts = data.debts,
@@ -80,13 +88,18 @@ class GroupDetailsViewModel(
             getGroupDetailsUseCase.execute(groupId)
                 .onSuccess { data ->
                     _uiState.update {
-                        val preservedError = if (it.selectedMemberForExpulsionId != null) {
+                        val preservedError = if (
+                            it.selectedMemberForExpulsionId != null ||
+                            it.selectedExpenseForDeletionId != null ||
+                            it.selectedDebtForPayment != null
+                        ) {
                             it.errorMessage
                         } else {
                             null
                         }
                         it.copy(
                             isLoading = false,
+                            currentUserId = data.currentUserId,
                             group = data.group,
                             expenses = data.expenses,
                             debts = data.debts,
@@ -103,6 +116,86 @@ class GroupDetailsViewModel(
                         it.copy(
                             isLoading = false,
                             errorMessage = error.message ?: "Could not load group details"
+                        )
+                    }
+                }
+        }
+    }
+
+    fun onDebtClicked(debt: Debt) {
+        val state = _uiState.value
+        if (state.isSettlingDebt) return
+        if (state.currentUserId.isNullOrBlank()) return
+        if (state.currentUserId != debt.fromUser) return
+
+        _uiState.update {
+            it.copy(
+                selectedDebtForPayment = debt,
+                debtPaymentAmountInput = "${debt.amount}",
+                errorMessage = null
+            )
+        }
+    }
+
+    fun onDebtPaymentAmountChanged(value: String) {
+        val normalized = value
+            .replace(',', '.')
+            .filter { character -> character.isDigit() || character == '.' }
+        _uiState.update { it.copy(debtPaymentAmountInput = normalized) }
+    }
+
+    fun dismissDebtPaymentDialog() {
+        if (_uiState.value.isSettlingDebt) return
+        _uiState.update {
+            it.copy(
+                selectedDebtForPayment = null,
+                debtPaymentAmountInput = ""
+            )
+        }
+    }
+
+    fun confirmDebtPayment() {
+        val state = _uiState.value
+        val selectedDebt = state.selectedDebtForPayment ?: return
+        if (state.isSettlingDebt) return
+
+        val amount = state.debtPaymentAmountInput
+            .replace(',', '.')
+            .toDoubleOrNull()
+
+        if (amount == null || amount <= 0.0) {
+            _uiState.update { it.copy(errorMessage = "Enter a valid amount greater than zero.") }
+            return
+        }
+
+        if (amount > selectedDebt.amount) {
+            _uiState.update { it.copy(errorMessage = "Amount cannot exceed current debt.") }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSettlingDebt = true, errorMessage = null) }
+
+            requestSettleDebtUseCase.execute(
+                groupId = groupId,
+                debt = selectedDebt,
+                amountToPay = amount
+            )
+                .onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            isSettlingDebt = false,
+                            selectedDebtForPayment = null,
+                            debtPaymentAmountInput = ""
+                        )
+                    }
+                    refreshGroupData()
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            isSettlingDebt = false,
+                            errorMessage = error.message ?: "Could not register payment"
                         )
                     }
                 }

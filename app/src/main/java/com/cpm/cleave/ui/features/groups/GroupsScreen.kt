@@ -61,6 +61,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -413,6 +414,60 @@ fun GroupDetailsScreen(
             )
         }
 
+        uiState.selectedDebtForPayment?.let { selectedDebt ->
+            val fromName = uiState.userDisplayNames[selectedDebt.fromUser] ?: selectedDebt.fromUser
+            val toName = uiState.userDisplayNames[selectedDebt.toUser] ?: selectedDebt.toUser
+
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissDebtPaymentDialog() },
+                title = { Text("Pay debt") },
+                text = {
+                    Column {
+                        Text("$fromName will pay $toName")
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = uiState.debtPaymentAmountInput,
+                            onValueChange = { viewModel.onDebtPaymentAmountChanged(it) },
+                            label = { Text("Amount") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Maximum: ${"%.2f".format(Locale.getDefault(), selectedDebt.amount)}",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 12.sp
+                        )
+                        uiState.errorMessage?.let { message ->
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = message,
+                                color = MaterialTheme.colorScheme.error,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { viewModel.dismissDebtPaymentDialog() },
+                        enabled = !uiState.isSettlingDebt
+                    ) {
+                        Text("Cancel")
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = { viewModel.confirmDebtPayment() },
+                        enabled = !uiState.isSettlingDebt
+                    ) {
+                        Text(if (uiState.isSettlingDebt) "Paying..." else "Pay")
+                    }
+                }
+            )
+        }
+
         selectedReceiptUrl?.let { receiptUrl ->
             ReceiptImageDialog(
                 receiptUrl = receiptUrl,
@@ -420,7 +475,7 @@ fun GroupDetailsScreen(
             )
         }
 
-        if (uiState.selectedMemberForExpulsionId == null) {
+        if (uiState.selectedMemberForExpulsionId == null && uiState.selectedDebtForPayment == null) {
             uiState.errorMessage?.let { Text(it, color = colorScheme.error) }
         }
 
@@ -507,10 +562,22 @@ fun GroupDetailsScreen(
                     val debt = debtWithReason.debt
                     val fromName = uiState.userDisplayNames[debt.fromUser] ?: debt.fromUser
                     val toName = uiState.userDisplayNames[debt.toUser] ?: debt.toUser
+                    val canSettleDebt = uiState.currentUserId == debt.fromUser
                     val reasonText = debtWithReason.reasons
                         .joinToString(", ") { reason -> "${reason.expenseLabel}: ${reason.amount}" }
                         .ifBlank { "No expense details" }
-                    Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(
+                                if (canSettleDebt) {
+                                    Modifier.clickable { viewModel.onDebtClicked(debt) }
+                                } else {
+                                    Modifier
+                                }
+                            )
+                            .padding(vertical = 6.dp)
+                    ) {
                         Text(
                             text = "$fromName owes $toName: ${"%.2f".format(Locale.getDefault(), debt.amount)}",
                             fontSize = 16.sp,
