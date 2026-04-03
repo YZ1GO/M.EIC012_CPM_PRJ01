@@ -227,25 +227,25 @@ class ExpenseRepositoryImpl(
     override suspend fun deleteExpense(groupId: String, expenseId: String): Result<Unit> {
         return try {
             val localExpense = cache.getExpenseById(expenseId)
-                ?: return Result.success(Unit)
 
             val isPendingLocalOnly = pendingSyncStore.getPendingExpenseSyncs()
                 .any { pending -> pending.groupId == groupId && pending.expenseId == expenseId }
 
-            if (!isPendingLocalOnly && !connectivityStatus.isNetworkAvailable()) {
-                return Result.failure(
-                    IllegalStateException("Deleting an expense requires an internet connection.")
-                )
-            }
+            val isOnline = connectivityStatus.isNetworkAvailable()
 
-            if (!isPendingLocalOnly) {
+            if (!isPendingLocalOnly && isOnline) {
                 syncExpenseDeletionToRemote(groupId = groupId, expenseId = expenseId)
+            } else if (!isPendingLocalOnly && !isOnline) {
+                pendingSyncStore.addPendingExpenseDeletion(groupId, expenseId)
             }
 
             cache.deleteExpenseWithRelations(expenseId)
             pendingSyncStore.removePendingExpenseSync(groupId, expenseId)
+            if (isPendingLocalOnly) {
+                pendingSyncStore.removePendingExpenseDeletion(groupId, expenseId)
+            }
 
-            localExpense.imagePath
+            localExpense?.imagePath
                 ?.takeIf { it.isLocalReceiptPath() }
                 ?.let { localPath ->
                     localReceiptFileFromPath(localPath)?.let { file ->
@@ -361,6 +361,24 @@ class ExpenseRepositoryImpl(
 
     private suspend fun flushPendingExpenseSyncs() {
         if (!connectivityStatus.isNetworkAvailable()) return
+
+        pendingSyncStore.getPendingExpenseDeletions().forEach { pendingDeletion ->
+            val deleteSucceeded = runCatching {
+                withTimeoutOrNull(4000L) {
+                    syncExpenseDeletionToRemote(
+                        groupId = pendingDeletion.groupId,
+                        expenseId = pendingDeletion.expenseId
+                    )
+                    true
+                } ?: false
+            }.getOrDefault(false)
+
+            if (deleteSucceeded) {
+                pendingSyncStore.removePendingExpenseDeletion(pendingDeletion.groupId, pendingDeletion.expenseId)
+            } else {
+                // Keep pending for later retry.
+            }
+        }
 
         pendingSyncStore.getPendingExpenseSyncs().forEach { pending ->
             val localExpense = cache.getExpenseById(pending.expenseId) ?: run {
