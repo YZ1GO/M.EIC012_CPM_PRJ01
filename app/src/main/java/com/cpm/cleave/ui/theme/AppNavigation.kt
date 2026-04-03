@@ -33,8 +33,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -271,7 +273,7 @@ fun BottomNavigationBar(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val screenHeightDp = LocalConfiguration.current.screenHeightDp
-    val barHeight = if (screenHeightDp <= 700) 64.dp else 72.dp
+    val barHeight = if (screenHeightDp <= 700) 72.dp else 80.dp // Slightly taller to house labels
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -286,14 +288,21 @@ fun BottomNavigationBar(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                NavItemBox(Modifier.weight(1f), currentRoute == NavScreen.Groups.route, Icons.Default.Groups) {
-                    navController.navigate(NavScreen.Groups.route) { popUpTo(navController.graph.startDestinationId) { saveState = true }; launchSingleTop = true; restoreState = true }
+                NavItemBox(
+                    modifier = Modifier.weight(1f), 
+                    selected = currentRoute == NavScreen.Groups.route, 
+                    icon = Icons.Default.Groups,
+                    label = NavScreen.Groups.title
+                ) {
+                    navController.navigate(NavScreen.Groups.route) { 
+                        popUpTo(navController.graph.startDestinationId) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true 
+                    }
                 }
 
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                     val color = MaterialTheme.colorScheme.primary
-                    
-                    // Tight anchor container for the DropdownMenu centering
                     Box {
                         Box(
                             modifier = Modifier
@@ -315,7 +324,6 @@ fun BottomNavigationBar(
                         DropdownMenu(
                             expanded = showActionMenu,
                             onDismissRequest = { showActionMenu = false },
-                            // offset adjusted horizontally to center the menu relative to the 52dp button
                             offset = DpOffset(x = (-60).dp, y = 0.dp),
                             shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.background(MaterialTheme.colorScheme.surface).padding(4.dp)
@@ -337,8 +345,17 @@ fun BottomNavigationBar(
                     }
                 }
 
-                NavItemBox(Modifier.weight(1f), currentRoute == NavScreen.Profile.route, Icons.Default.Person) {
-                    navController.navigate(NavScreen.Profile.route) { popUpTo(navController.graph.startDestinationId) { saveState = true }; launchSingleTop = true; restoreState = true }
+                NavItemBox(
+                    modifier = Modifier.weight(1f), 
+                    selected = currentRoute == NavScreen.Profile.route, 
+                    icon = Icons.Default.Person,
+                    label = NavScreen.Profile.title
+                ) {
+                    navController.navigate(NavScreen.Profile.route) { 
+                        popUpTo(navController.graph.startDestinationId) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true 
+                    }
                 }
             }
 
@@ -348,15 +365,45 @@ fun BottomNavigationBar(
 }
 
 @Composable
-fun NavItemBox(modifier: Modifier, selected: Boolean, icon: ImageVector, onClick: () -> Unit) {
-    val tint by animateColorAsState(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f), label = "")
-    Box(
+fun NavItemBox(
+    modifier: Modifier, 
+    selected: Boolean, 
+    icon: ImageVector, 
+    label: String,
+    onClick: () -> Unit
+) {
+    val tint by animateColorAsState(
+        targetValue = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f), 
+        label = "iconTint"
+    )
+
+    Column(
         modifier = modifier
             .fillMaxHeight()
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick), 
-        contentAlignment = Alignment.Center
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() }, 
+                indication = null, 
+                onClick = onClick
+            ), 
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        Icon(icon, null, tint = tint, modifier = Modifier.size(32.dp))
+        Icon(
+            imageVector = icon, 
+            contentDescription = null, 
+            tint = tint, 
+            modifier = Modifier.size(26.dp)
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = label,
+            color = tint,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                fontSize = 11.sp,
+                letterSpacing = 0.5.sp
+            )
+        )
     }
 }
 
