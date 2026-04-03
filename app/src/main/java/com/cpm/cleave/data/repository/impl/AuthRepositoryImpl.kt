@@ -10,6 +10,7 @@ import com.cpm.cleave.domain.repository.DEFAULT_ANONYMOUS_LIMITS
 import com.cpm.cleave.domain.repository.contracts.IAuthRepository
 import com.cpm.cleave.model.User
 import com.google.android.gms.tasks.Task
+import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.UserProfileChangeRequest
@@ -358,6 +359,59 @@ override suspend fun signUpWithEmail(
 
             authSessionStore.updateUserPhotoUrl(firebaseUser.uid, null)
                 ?: firebaseUser.toDomainUser().copy(photoUrl = null)
+        }
+    }
+
+    override suspend fun updateProfileName(newName: String): Result<User> {
+        return runCatching {
+            val trimmedName = newName.trim()
+            if (trimmedName.isBlank()) {
+                throw IllegalArgumentException("Name cannot be empty")
+            }
+
+            val firebaseUser = firebaseAuth.currentUser
+                ?: throw IllegalStateException("No signed-in user")
+
+            firebaseUser.updateProfile(
+                UserProfileChangeRequest.Builder()
+                    .setDisplayName(trimmedName)
+                    .build()
+            ).awaitTaskResult()
+
+            ensureUserDocument(
+                uid = firebaseUser.uid,
+                name = trimmedName,
+                email = firebaseUser.email,
+                isAnonymous = firebaseUser.isAnonymous,
+                photoUrl = firebaseUser.photoUrl?.toString()
+            )
+
+            authSessionStore.updateUserName(firebaseUser.uid, trimmedName)
+                ?: firebaseUser.toDomainUser().copy(name = trimmedName)
+        }
+    }
+
+    override suspend fun canResetPasswordForCurrentUser(): Result<Boolean> {
+        return runCatching {
+            val firebaseUser = firebaseAuth.currentUser ?: return@runCatching false
+            if (firebaseUser.isAnonymous) return@runCatching false
+            firebaseUser.providerData.any { it.providerId == "password" }
+        }
+    }
+
+    override suspend fun changePassword(currentPassword: String, newPassword: String): Result<Unit> {
+        return runCatching {
+            val firebaseUser = firebaseAuth.currentUser
+                ?: throw IllegalStateException("No signed-in user")
+
+            val email = firebaseUser.email?.trim().orEmpty()
+            if (email.isBlank()) {
+                throw IllegalStateException("Email not available for password change")
+            }
+
+            val credential = EmailAuthProvider.getCredential(email, currentPassword)
+            firebaseUser.reauthenticate(credential).awaitTaskResult()
+            firebaseUser.updatePassword(newPassword).awaitTaskResult()
         }
     }
 

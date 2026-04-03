@@ -6,8 +6,10 @@ data class ProfileUiState(
     val isLoading: Boolean = true,
     val currentUser: User? = null,
     val errorMessage: String? = null,
+    val successMessage: String? = null,
     val maxGroups: Int = 0,
     val isBusy: Boolean = false,
     val pendingPhotoUri: String? = null,
-    val isUploadingPhoto: Boolean = false
+    val isUploadingPhoto: Boolean = false,
+    val canResetPassword: Boolean = false
 )

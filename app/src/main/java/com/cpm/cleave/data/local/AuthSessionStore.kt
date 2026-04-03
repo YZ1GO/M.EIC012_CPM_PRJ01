@@ -272,6 +272,19 @@ class AuthSessionStore(context: Context) {
         }
     }
 
+    suspend fun updateUserName(userId: String, name: String): User? {
+        return database.withTransaction {
+            val user = userDao.getUserById(userId) ?: return@withTransaction null
+            userDao.updateUser(
+                user.copy(
+                    name = name,
+                    lastSeen = System.currentTimeMillis()
+                )
+            )
+            userDao.getUserById(userId)?.toDomain()
+        }
+    }
+
     fun observeActiveUser(): Flow<User?> {
         return userDao.observeActiveUser().map { it?.toDomain() }
     }

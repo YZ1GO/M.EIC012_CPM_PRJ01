@@ -3,6 +3,13 @@ package com.cpm.cleave.ui.features.profile
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,19 +30,31 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.LockReset
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -50,13 +69,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import coil.compose.AsyncImage
 import com.cpm.cleave.R 
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -67,10 +90,23 @@ fun ProfileScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val credentialManager = remember(context) { CredentialManager.create(context) }
     
     var showPhotoMenu by remember { mutableStateOf(false) }
+    var showChangePasswordDialog by remember { mutableStateOf(false) }
+    var currentPassword by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    var showCurrentPassword by remember { mutableStateOf(false) }
+    var showNewPassword by remember { mutableStateOf(false) }
+    var showConfirmPassword by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    
+    // State for Inline Name Editing
+    var isEditingName by remember { mutableStateOf(false) }
+    var editedName by remember { mutableStateOf("") }
+    val maxNameLength = 30
 
     val pickImageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -79,11 +115,7 @@ fun ProfileScreen(
             viewModel.onProfilePhotoSelected(null, null)
             return@rememberLauncherForActivityResult
         }
-
-        val bytes = runCatching {
-            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-        }.getOrNull()
-        
+        val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
         viewModel.onProfilePhotoSelected(uri.toString(), bytes)
         viewModel.onSaveProfilePhotoClicked()
     }
@@ -105,15 +137,149 @@ fun ProfileScreen(
                 ProfileUiEffect.ProfilePhotoSaved -> {
                     Toast.makeText(context, "Profile photo updated", Toast.LENGTH_SHORT).show()
                 }
+                ProfileUiEffect.PasswordChanged -> {
+                    showChangePasswordDialog = false
+                    currentPassword = ""
+                    newPassword = ""
+                    confirmPassword = ""
+                    showCurrentPassword = false
+                    showNewPassword = false
+                    showConfirmPassword = false
+                }
                 ProfileUiEffect.SignedOut -> {
-                    try {
-                        credentialManager.clearCredentialState(ClearCredentialStateRequest())
-                    } catch (_: Exception) {}
+                    try { credentialManager.clearCredentialState(ClearCredentialStateRequest()) } catch (_: Exception) {}
                     Toast.makeText(context, "Signed out", Toast.LENGTH_SHORT).show()
                     onSignedOut()
                 }
             }
         }
+    }
+
+    LaunchedEffect(uiState.successMessage) {
+        if (uiState.successMessage != null) {
+            delay(1500)
+            viewModel.clearSuccessMessage()
+        }
+    }
+
+    if (showChangePasswordDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!uiState.isBusy) {
+                    showChangePasswordDialog = false
+                }
+            },
+            title = { Text("Change Password") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    uiState.errorMessage?.let { message ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.1f),
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ErrorOutline,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = message,
+                                color = MaterialTheme.colorScheme.error,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = currentPassword,
+                        onValueChange = { currentPassword = it },
+                        label = { Text("Current password") },
+                        singleLine = true,
+                        visualTransformation = if (showCurrentPassword) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { showCurrentPassword = !showCurrentPassword }) {
+                                Icon(
+                                    imageVector = if (showCurrentPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = if (showCurrentPassword) "Hide current password" else "Show current password"
+                                )
+                            }
+                        },
+                        enabled = !uiState.isBusy,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = newPassword,
+                        onValueChange = { newPassword = it },
+                        label = { Text("New password") },
+                        singleLine = true,
+                        visualTransformation = if (showNewPassword) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { showNewPassword = !showNewPassword }) {
+                                Icon(
+                                    imageVector = if (showNewPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = if (showNewPassword) "Hide new password" else "Show new password"
+                                )
+                            }
+                        },
+                        enabled = !uiState.isBusy,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = confirmPassword,
+                        onValueChange = { confirmPassword = it },
+                        label = { Text("Confirm new password") },
+                        singleLine = true,
+                        visualTransformation = if (showConfirmPassword) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { showConfirmPassword = !showConfirmPassword }) {
+                                Icon(
+                                    imageVector = if (showConfirmPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = if (showConfirmPassword) "Hide confirmed password" else "Show confirmed password"
+                                )
+                            }
+                        },
+                        enabled = !uiState.isBusy,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.changePassword(
+                            currentPassword = currentPassword,
+                            newPassword = newPassword,
+                            confirmPassword = confirmPassword
+                        )
+                    },
+                    enabled = !uiState.isBusy
+                ) {
+                    Text(if (uiState.isBusy) "Changing..." else "Change")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showChangePasswordDialog = false
+                        showCurrentPassword = false
+                        showNewPassword = false
+                        showConfirmPassword = false
+                    },
+                    enabled = !uiState.isBusy
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     // --- Photo Options Bottom Sheet ---
@@ -123,54 +289,32 @@ fun ProfileScreen(
             sheetState = sheetState,
             containerColor = MaterialTheme.colorScheme.surface
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 16.dp)
-            ) {
-                Text(
-                    text = "Profile Photo",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp)) {
+                Text("Profile Photo", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(modifier = Modifier.height(24.dp))
-
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable {
-                            showPhotoMenu = false
-                            pickImageLauncher.launch("image/*")
-                        }
-                        .padding(16.dp),
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable {
+                        showPhotoMenu = false
+                        pickImageLauncher.launch("image/*")
+                    }.padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(Icons.Default.PhotoLibrary, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     Spacer(modifier = Modifier.width(16.dp))
                     Text("Choose new photo", fontSize = 16.sp, fontWeight = FontWeight.Medium)
                 }
-
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable {
-                            showPhotoMenu = false
-                            // Passes empty string to clear the UI
-                            viewModel.onProfilePhotoSelected("", null)
-                            // Triggers save. Make sure your ViewModel allows saving empty URIs to delete it!
-                            viewModel.onSaveProfilePhotoClicked()
-                        }
-                        .padding(16.dp),
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable {
+                        showPhotoMenu = false
+                        viewModel.onProfilePhotoSelected("", null)
+                        viewModel.onSaveProfilePhotoClicked()
+                    }.padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error)
                     Spacer(modifier = Modifier.width(16.dp))
                     Text("Remove photo", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.error)
                 }
-
                 Spacer(modifier = Modifier.height(32.dp))
             }
         }
@@ -191,9 +335,82 @@ fun ProfileScreen(
             fontWeight = FontWeight.Medium
         )
 
-        uiState.errorMessage?.let {
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(text = it, color = MaterialTheme.colorScheme.error, fontSize = 14.sp)
+        AnimatedVisibility(
+            visible = uiState.errorMessage != null && !showChangePasswordDialog,
+            enter = expandVertically(
+                animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing)
+            ) + fadeIn(animationSpec = tween(300)),
+            exit = shrinkVertically(
+                animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing)
+            ) + fadeOut(animationSpec = tween(300))
+        ) {
+            Column(modifier = Modifier.padding(top = 16.dp)) {
+                uiState.errorMessage?.let { message ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                color = MaterialTheme.colorScheme.error.copy(alpha = 0.1f),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.ErrorOutline,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = message,
+                            color = MaterialTheme.colorScheme.error,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+        }
+
+        AnimatedVisibility(
+            visible = uiState.successMessage != null && !showChangePasswordDialog,
+            enter = expandVertically(
+                animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing)
+            ) + fadeIn(animationSpec = tween(300)),
+            exit = shrinkVertically(
+                animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing)
+            ) + fadeOut(animationSpec = tween(300))
+        ) {
+            Column(modifier = Modifier.padding(top = 12.dp)) {
+                uiState.successMessage?.let { message ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                color = Color(0xFF4CAF50).copy(alpha = 0.1f),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF2E7D32),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = message,
+                            color = Color(0xFF2E7D32),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
         }
 
         if (uiState.isLoading || uiState.currentUser == null) {
@@ -209,79 +426,46 @@ fun ProfileScreen(
         Spacer(modifier = Modifier.height(40.dp))
 
         // --- Avatar Section ---
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            
-            Box(
-                modifier = Modifier
-                    .size(120.dp)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        enabled = !uiState.isUploadingPhoto,
-                        onClick = {
-                            if (hasPhoto) {
-                                showPhotoMenu = true 
-                            } else {
-                                pickImageLauncher.launch("image/*") 
-                            }
-                        }
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                // The Photo
-                AsyncImage(
-                    model = photoModel.takeIf { hasPhoto } ?: R.drawable.default_user_image,
-                    contentDescription = "Profile photo",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(112.dp)
-                        .clip(CircleShape)
-                        .border(
-                            width = 2.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                            shape = CircleShape
-                        )
-                )
-                
-                // Uploading Overlay
-                if (uiState.isUploadingPhoto) {
-                    Box(
-                        modifier = Modifier
-                            .size(112.dp)
-                            .background(Color.Black.copy(alpha = 0.4f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(
-                            color = Color.White, 
-                            strokeWidth = 3.dp, 
-                            modifier = Modifier.size(32.dp)
-                        )
+        Box(
+            modifier = Modifier
+                .size(120.dp)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    enabled = !uiState.isUploadingPhoto,
+                    onClick = {
+                        if (hasPhoto) showPhotoMenu = true else pickImageLauncher.launch("image/*") 
                     }
-                } 
-                // Camera Badge (Only if no photo AND not uploading)
-                else if (!hasPhoto) {
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            AsyncImage(
+                model = photoModel.takeIf { hasPhoto } ?: R.drawable.default_user_image,
+                contentDescription = "Profile photo",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(112.dp)
+                    .clip(CircleShape)
+                    .border(2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), CircleShape)
+            )
+            
+            if (uiState.isUploadingPhoto) {
+                Box(
+                    modifier = Modifier.size(112.dp).background(Color.Black.copy(alpha = 0.4f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp, modifier = Modifier.size(32.dp))
+                }
+            } else if (!hasPhoto) {
+                Box(
+                    modifier = Modifier.align(Alignment.BottomEnd).offset(x = (-4).dp, y = (-4).dp).size(36.dp).background(MaterialTheme.colorScheme.surface, CircleShape).padding(3.dp),
+                    contentAlignment = Alignment.Center
+                ) {
                     Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .offset(x = (-4).dp, y = (-4).dp)
-                            .size(36.dp)
-                            .background(MaterialTheme.colorScheme.surface, CircleShape)
-                            .padding(3.dp),
+                        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.AddAPhoto,
-                                contentDescription = "Add photo",
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
+                        Icon(Icons.Default.AddAPhoto, contentDescription = "Add photo", tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(18.dp))
                     }
                 }
             }
@@ -299,14 +483,72 @@ fun ProfileScreen(
                 modifier = Modifier.padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(
-                    text = user.name.ifBlank { "Anonymous User" },
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
                 
-                Spacer(modifier = Modifier.height(8.dp))
+                // Name Display / Edit Mode
+                if (isEditingName) {
+                    OutlinedTextField(
+                        value = editedName,
+                        onValueChange = { if (it.length <= maxNameLength) editedName = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                            focusedBorderColor = MaterialTheme.colorScheme.primary
+                        ),
+                        trailingIcon = {
+                            IconButton(onClick = { isEditingName = false }) {
+                                Icon(Icons.Default.Close, contentDescription = "Cancel", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        Button(
+                            onClick = {
+                                keyboardController?.hide()
+                                isEditingName = false
+                                viewModel.updateName(editedName)
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(36.dp)
+                        ) {
+                            Text("Save", fontSize = 14.sp)
+                        }
+                    }
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = user.name.ifBlank { "Anonymous User" },
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Edit Name",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .size(20.dp)
+                                .clickable { 
+                                    editedName = user.name
+                                    isEditingName = true 
+                                }
+                        )
+                    }
+                }
+
+                user.email?.takeIf { it.isNotBlank() }?.let { email ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = email,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
                 
                 val isGuest = user.isAnonymous
                 Box(
@@ -327,19 +569,46 @@ fun ProfileScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Groups, 
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Member of ${user.groups.size} group${if (user.groups.size != 1) "s" else ""}",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 14.sp
-                    )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Groups Count
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Groups, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "${user.groups.size} group${if (user.groups.size != 1) "s" else ""}",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 14.sp
+                        )
+                    }
+                    
+                    // Change Password (Only for email/password accounts managed by the app)
+                    if (uiState.canResetPassword) {
+                        Box(modifier = Modifier.width(1.dp).height(16.dp).background(MaterialTheme.colorScheme.outlineVariant))
+                        
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    currentPassword = ""
+                                    newPassword = ""
+                                    confirmPassword = ""
+                                    showCurrentPassword = false
+                                    showNewPassword = false
+                                    showConfirmPassword = false
+                                    showChangePasswordDialog = true
+                                }
+                                .padding(4.dp)
+                        ) {
+                            Icon(Icons.Default.LockReset, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Change Password", color = MaterialTheme.colorScheme.primary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
                 }
             }
         }
@@ -353,26 +622,11 @@ fun ProfileScreen(
                     .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = "Info",
-                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.size(24.dp)
-                )
+                Icon(Icons.Default.Info, contentDescription = "Info", tint = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.size(24.dp))
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
-                    Text(
-                        text = "Guest Limitations",
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                    Text(
-                        text = "You can only join up to ${uiState.maxGroups} groups. Sign Up to lift this limit and secure your data.",
-                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp
-                    )
+                    Text("Guest Limitations", color = MaterialTheme.colorScheme.onSecondaryContainer, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text("You can only join up to ${uiState.maxGroups} groups. Sign Up to lift this limit and secure your data.", color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f), fontSize = 12.sp, lineHeight = 16.sp)
                 }
             }
         }
@@ -398,15 +652,9 @@ fun ProfileScreen(
                 Button(
                     onClick = viewModel::onLogInClicked,
                     enabled = !uiState.isBusy,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.Transparent,
-                        contentColor = MaterialTheme.colorScheme.primary
-                    ),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = MaterialTheme.colorScheme.primary),
                     shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                    modifier = Modifier.fillMaxWidth().height(52.dp).border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
                 ) {
                     Text("Log In", fontSize = 16.sp, fontWeight = FontWeight.Medium)
                 }
@@ -414,10 +662,7 @@ fun ProfileScreen(
                 Button(
                     onClick = viewModel::onSignOutClicked,
                     enabled = !uiState.isBusy,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer
-                    ),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth().height(52.dp)
                 ) {

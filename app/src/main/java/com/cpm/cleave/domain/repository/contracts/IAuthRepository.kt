@@ -27,6 +27,9 @@ interface IAuthRepository {
     suspend fun signOut(): Result<Unit>
     suspend fun updateProfilePhoto(imageBytes: ByteArray): Result<User>
     suspend fun removeProfilePicture(): Result<User>
+    suspend fun updateProfileName(newName: String): Result<User>
+    suspend fun canResetPasswordForCurrentUser(): Result<Boolean>
+    suspend fun changePassword(currentPassword: String, newPassword: String): Result<Unit>
 
     suspend fun sendPasswordResetEmail(email: String): Result<Unit>
 

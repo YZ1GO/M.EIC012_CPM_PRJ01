@@ -5,5 +5,6 @@ sealed interface ProfileUiEffect {
     data object NavigateToSignIn : ProfileUiEffect
     data object NavigateToRegister : ProfileUiEffect
     data object ProfilePhotoSaved : ProfileUiEffect
+    data object PasswordChanged : ProfileUiEffect
     data object SignedOut : ProfileUiEffect
 }

@@ -16,6 +16,18 @@ class AuthViewModel(
     private val _uiState = MutableStateFlow(AuthUiState())
     val uiState: StateFlow<AuthUiState> = _uiState.asStateFlow()
 
+    // --- Validation Helpers ---
+    private fun isValidEmail(email: String): Boolean {
+        return email.matches(Regex("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[a-zA-Z]{2,}\$"))
+    }
+
+    private fun isValidName(name: String): Boolean {
+        // Allows upper/lowercase letters, numbers, spaces, underscores, periods, and hyphens.
+        // Rejects emojis, special symbols (!@#$%^&*), and invisible formatting characters.
+        return name.matches(Regex("^[a-zA-Z0-9_ .-]+$"))
+    }
+
+    // --- State Updaters ---
     fun onNameChanged(value: String) {
         _uiState.update { it.copy(name = value, errorMessage = null) }
     }
@@ -55,17 +67,33 @@ class AuthViewModel(
         }
     }
 
+    fun clearErrorMessage() {
+        _uiState.update { it.copy(errorMessage = null) }
+    }
+
+    fun clearResetPasswordMessage() {
+        _uiState.update { it.copy(resetPasswordMessage = null) }
+    }
+
+    // --- Authentication Actions ---
     fun signInWithEmail() {
         val state = _uiState.value
-        if (state.email.isBlank() || state.password.isBlank()) {
-            _uiState.update { it.copy(errorMessage = "Email and password are required") }
+        val email = state.email.trim()
+        
+        if (email.isBlank() || state.password.isBlank()) {
+            setTransientError("Email and password are required")
+            return
+        }
+        
+        if (!isValidEmail(email)) {
+            setTransientError("Please enter a valid email address")
             return
         }
 
         _uiState.update { it.copy(isLoading = true, errorMessage = null) }
         viewModelScope.launch {
             authRepository.signInWithEmail(
-                email = state.email.trim(),
+                email = email,
                 password = state.password,
                 mergeAnonymousData = state.mergeGuestDataOnSignIn
             ).onSuccess {
@@ -77,32 +105,43 @@ class AuthViewModel(
                     )
                 }
             }.onFailure { error ->
-                _uiState.update { current ->
-                    current.copy(
-                        isLoading = false,
-                        errorMessage = error.localizedMessage ?: error.message ?: error.toString()
-                    )
-                }
+                setTransientError(error.localizedMessage ?: error.message ?: "Could not sign in")
             }
         }
     }
 
     fun signUpWithEmail() {
         val state = _uiState.value
-        if (state.name.isBlank()) {
-            _uiState.update { it.copy(errorMessage = "Name is required") }
+        val name = state.name.trim()
+        val email = state.email.trim()
+
+        if (name.isBlank()) {
+            setTransientError("Name is required")
             return
         }
-        if (state.email.isBlank() || state.password.isBlank()) {
-            _uiState.update { it.copy(errorMessage = "Email and password are required") }
+        if (name.length > 30) {
+            setTransientError("Name cannot exceed 30 characters")
+            return
+        }
+        // Name Validation Check
+        if (!isValidName(name)) {
+            setTransientError("Name can only contain letters, numbers, spaces, dots, hyphens, and underscores")
+            return
+        }
+        if (email.isBlank() || state.password.isBlank()) {
+            setTransientError("Email and password are required")
+            return
+        }
+        if (!isValidEmail(email)) {
+            setTransientError("Please enter a valid email address")
             return
         }
 
         _uiState.update { it.copy(isLoading = true, errorMessage = null) }
         viewModelScope.launch {
             authRepository.signUpWithEmail(
-                name = state.name.trim(),
-                email = state.email.trim(),
+                name = name,
+                email = email,
                 password = state.password,
                 mergeAnonymousData = true
             ).onSuccess {
@@ -114,19 +153,14 @@ class AuthViewModel(
                     )
                 }
             }.onFailure { error ->
-                _uiState.update { current ->
-                    current.copy(
-                        isLoading = false,
-                        errorMessage = error.localizedMessage ?: error.message ?: error.toString()
-                    )
-                }
+                setTransientError(error.localizedMessage ?: error.message ?: "Could not sign up")
             }
         }
     }
 
     fun signInWithGoogleIdToken(idToken: String) {
         if (idToken.isBlank()) {
-            _uiState.update { it.copy(errorMessage = "Invalid Google token") }
+            setTransientError("Invalid Google token")
             return
         }
 
@@ -147,12 +181,7 @@ class AuthViewModel(
                     }
                 }
                 .onFailure { error ->
-                    _uiState.update { current ->
-                        current.copy(
-                            isLoading = false,
-                            errorMessage = error.localizedMessage ?: error.message ?: error.toString()
-                        )
-                    }
+                    setTransientError(error.localizedMessage ?: error.message ?: "Could not sign in with Google")
                 }
         }
     }
@@ -173,12 +202,7 @@ class AuthViewModel(
                     }
                 }
                 .onFailure { error ->
-                    _uiState.update { current ->
-                        current.copy(
-                            isLoading = false,
-                            errorMessage = error.localizedMessage ?: error.message ?: error.toString()
-                        )
-                    }
+                    setTransientError(error.localizedMessage ?: error.message ?: "Could not create guest account")
                 }
         }
     }
@@ -186,7 +210,11 @@ class AuthViewModel(
     fun sendPasswordResetEmail() {
         val email = _uiState.value.email.trim()
         if (email.isBlank()) {
-            _uiState.update { it.copy(errorMessage = "Please enter your email first") }
+            setTransientError("Please enter your email first")
+            return
+        }
+        if (!isValidEmail(email)) {
+            setTransientError("Please enter a valid email address")
             return
         }
 
@@ -203,12 +231,7 @@ class AuthViewModel(
                     }
                 }
                 .onFailure { error ->
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            errorMessage = error.localizedMessage ?: "Could not send reset email"
-                        )
-                    }
+                    setTransientError(error.localizedMessage ?: "Could not send reset email")
                 }
         }
     }
