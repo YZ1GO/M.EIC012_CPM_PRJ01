@@ -38,9 +38,14 @@ class ProfileViewModel(
         refresh()
     }
 
-    fun refresh() {
+    fun refresh(showLoading: Boolean = true) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null, successMessage = null) }
+            if (showLoading) {
+                _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            } else {
+                _uiState.update { it.copy(errorMessage = null) }
+            }
+
             repository.getCurrentUser()
                 .onSuccess { user ->
                     val canResetPassword = if (user == null) {
@@ -53,10 +58,9 @@ class ProfileViewModel(
                             isLoading = false,
                             currentUser = user,
                             errorMessage = null,
-                            successMessage = null
+                            canResetPassword = canResetPassword
                         )
                     }
-                    _uiState.update { it.copy(canResetPassword = canResetPassword) }
                 }
                 .onFailure { error ->
                     _uiState.update {
@@ -64,7 +68,6 @@ class ProfileViewModel(
                             isLoading = false,
                             currentUser = null,
                             errorMessage = error.message ?: "Could not load profile",
-                            successMessage = null,
                             canResetPassword = false
                         )
                     }

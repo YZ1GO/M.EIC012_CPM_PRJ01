@@ -149,7 +149,6 @@ fun CreateGroupScreen(viewModel: CreateGroupViewModel, onNavigateBack: () -> Uni
                                 .fillMaxWidth()
                                 .clickable {
                                     viewModel.onCurrencyChanged(currency.code)
-                                    viewModel.onCurrencyInputChanged(currency.code) 
                                     showCurrencySelector = false
                                 }
                                 .padding(vertical = 16.dp, horizontal = 8.dp),

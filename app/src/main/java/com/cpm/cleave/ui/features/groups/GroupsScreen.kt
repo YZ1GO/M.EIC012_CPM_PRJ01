@@ -12,6 +12,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,15 +30,22 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -62,6 +70,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -73,14 +82,21 @@ import com.cpm.cleave.model.Expense
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import coil.compose.AsyncImage
+import androidx.compose.ui.text.style.TextOverflow
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GroupsScreen(groupsViewModel: GroupsViewModel, onGroupClick: (String) -> Unit) {
+fun GroupsScreen(
+    groupsViewModel: GroupsViewModel,
+    refreshNonce: Int = 0,
+    onGroupClick: (String) -> Unit
+) {
     val uiState by groupsViewModel.uiState.collectAsState()
     val displayedGroups = if (uiState.searchQuery.isBlank()) {
         uiState.groups
@@ -93,60 +109,165 @@ fun GroupsScreen(groupsViewModel: GroupsViewModel, onGroupClick: (String) -> Uni
     }
 
     val focusManager = LocalFocusManager.current
+    var isRefreshing by remember { mutableStateOf(false) }
+    var refreshStartedAtMs by remember { mutableStateOf(0L) }
+    val minRefreshVisibleMs = 900L
 
-    Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp)
+    // Stop the refreshing animation when a load attempt finishes.
+    LaunchedEffect(uiState.loadCompletionToken) {
+        if (uiState.loadCompletionToken > 0L && isRefreshing) {
+            val elapsed = System.currentTimeMillis() - refreshStartedAtMs
+            val remaining = (minRefreshVisibleMs - elapsed).coerceAtLeast(0L)
+            if (remaining > 0L) delay(remaining)
+            isRefreshing = false
+        }
+    }
+
+    LaunchedEffect(refreshNonce) {
+        if (refreshNonce > 0) {
+            refreshStartedAtMs = System.currentTimeMillis()
+            isRefreshing = true
+            groupsViewModel.loadGroups()
+        }
+    }
+
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = {
+            refreshStartedAtMs = System.currentTimeMillis()
+            isRefreshing = true
+            groupsViewModel.loadGroups()
+        },
+        modifier = Modifier.fillMaxSize()
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                // Top and side padding only, bottom padding is handled by the LazyColumn
+                .padding(top = 16.dp, start = 16.dp, end = 16.dp)
         ) {
-            OutlinedTextField(
-                value = uiState.searchQuery,
-                onValueChange = { groupsViewModel.onSearchQueryChanged(it) },
-                placeholder = { Text("Search") },
-                trailingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
-                shape = RoundedCornerShape(24.dp),
-                modifier = Modifier.weight(1f).height(56.dp),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(
-                    onSearch = {
-                        focusManager.clearFocus()
-                    }
-                )
-            )
-        }
+            Spacer(modifier = Modifier.height(16.dp))
 
-        Spacer(modifier = Modifier.height(32.dp))
-
-        if (uiState.isLoading) {
-            Text("Loading groups...")
-            return@Column
-        }
-
-        uiState.errorMessage?.let { message ->
-            Text(text = message, color = MaterialTheme.colorScheme.error)
-            Spacer(modifier = Modifier.height(12.dp))
-            Button(onClick = { groupsViewModel.loadGroups() }) {
-                Text("Retry")
-            }
-            return@Column
-        }
-
-        if (displayedGroups.isEmpty()) {
+            // Screen Header
             Text(
-                text = if (uiState.searchQuery.isBlank()) "No groups yet." else "No matching groups.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                text = "My Groups",
+                color = MaterialTheme.colorScheme.primary,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold
             )
-            return@Column
-        }
 
-        LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(24.dp)
-        ) {
-            items(displayedGroups) { group ->
-                GroupListItem(group = group, onClick = { onGroupClick(group.id) })
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = uiState.searchQuery,
+                    onValueChange = { groupsViewModel.onSearchQueryChanged(it) },
+                    placeholder = { Text("Search groups...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(56.dp),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                        focusedBorderColor = MaterialTheme.colorScheme.primary
+                    ),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(
+                        onSearch = {
+                            focusManager.clearFocus()
+                        }
+                    )
+                )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Centered Loading State
+            if (uiState.isLoading && !isRefreshing && uiState.groups.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Syncing groups...",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+                return@PullToRefreshBox
+            }
+
+            // Centered Error State
+            uiState.errorMessage?.let { message ->
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ErrorOutline,
+                        contentDescription = "Error",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = message,
+                        color = MaterialTheme.colorScheme.error,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Button(
+                        onClick = { groupsViewModel.loadGroups() },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Text("Retry")
+                    }
+                }
+                return@PullToRefreshBox
+            }
+
+            // Centered Empty State
+            if (displayedGroups.isEmpty()) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Groups,
+                        contentDescription = "No Groups",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        modifier = Modifier.size(64.dp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = if (uiState.searchQuery.isBlank()) "You haven't joined any groups yet." else "No matching groups found.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Center
+                    )
+                }
+                return@PullToRefreshBox
+            }
+
+            // Group List
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxSize(),
+                // Adds padding to the very bottom of the list so the last item isn't cut off
+                contentPadding = PaddingValues(bottom = 24.dp)
+            ) {
+                items(displayedGroups) { group ->
+                    GroupListItem(group = group, onClick = { onGroupClick(group.id) })
+                }
             }
         }
     }
@@ -154,50 +275,128 @@ fun GroupsScreen(groupsViewModel: GroupsViewModel, onGroupClick: (String) -> Uni
 
 @Composable
 fun GroupListItem(group: Group, onClick: () -> Unit) {
+    val currencyDisplay = formatCurrencySymbolAndCode(group.currency)
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         val groupImageUrl = group.imageUrl?.takeIf { it.isNotBlank() }
+        
+        // Avatar
         Box(
             modifier = Modifier
-                .size(64.dp)
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp)),
+                .size(56.dp) // Slightly smaller for a lighter, more elegant feel
+                .clip(RoundedCornerShape(14.dp))
+                .background(MaterialTheme.colorScheme.primaryContainer),
             contentAlignment = Alignment.Center
         ) {
             AsyncImage(
                 model = groupImageUrl ?: R.drawable.default_group_image,
                 contentDescription = "Group image",
                 contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .size(64.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                modifier = Modifier.fillMaxSize()
             )
         }
 
         Spacer(modifier = Modifier.width(16.dp))
 
-        Column {
+        // Text Content
+        Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = group.name,
                 fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
+                fontSize = 17.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
-            Text(
-                text = "Currency: ${group.currency}",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 14.sp
-            )
-            Text(
-                text = "Code: ${group.joinCode}",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 14.sp
-            )
+            
+            Spacer(modifier = Modifier.height(6.dp))
+            
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Subtle Code Badge
+                Box(
+                    modifier = Modifier
+                        .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "Code: ${group.joinCode}",
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 0.5.sp
+                    )
+                }
+
+                // Bullet Separator
+                Text(
+                    text = "•",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
+
+                // Currency Text (allowed to breathe)
+                Text(
+                    text = currencyDisplay,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
+        
+        // Chevron
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = "View Group",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+            modifier = Modifier.padding(start = 8.dp)
+        )
     }
 }
+
+private fun formatCurrencySymbolAndCode(code: String): String {
+    val normalized = code.trim().uppercase(Locale.ROOT)
+    if (normalized.isBlank()) return code
+
+    val symbol = currencySymbolsByCode[normalized]
+
+    return if (symbol.isNullOrBlank()) normalized else "$symbol $normalized"
+}
+
+private val currencySymbolsByCode = mapOf(
+    "AUD" to "$",
+    "BRL" to "R$",
+    "CAD" to "$",
+    "CHF" to "₣",
+    "CNY" to "¥",
+    "EUR" to "€",
+    "GBP" to "£",
+    "HKD" to "$",
+    "INR" to "₹",
+    "JPY" to "¥",
+    "KRW" to "₩",
+    "MXN" to "$",
+    "NOK" to "kr",
+    "NZD" to "$",
+    "PLN" to "zł",
+    "SEK" to "kr",
+    "SGD" to "$",
+    "TWD" to "NT$",
+    "USD" to "$",
+    "ZAR" to "R"
+)
 
 @Composable
 fun GroupDetailsScreen(

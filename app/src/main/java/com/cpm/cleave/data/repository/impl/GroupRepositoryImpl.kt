@@ -69,6 +69,7 @@ class GroupRepositoryImpl(
                 val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
                 val refreshMutex = Mutex()
+                var lastRemoteRefreshAtMs = 0L
 
                 val groupDocRegistrations = mutableMapOf<String, ListenerRegistration>()
                 val memberDocRegistrations = mutableMapOf<String, ListenerRegistration>()
@@ -76,6 +77,18 @@ class GroupRepositoryImpl(
 
                 suspend fun refreshAndEmit() {
                     refreshMutex.withLock {
+                        val now = System.currentTimeMillis()
+                        val canRefreshRemote =
+                            now - lastRemoteRefreshAtMs >= OBSERVE_REMOTE_REFRESH_MIN_INTERVAL_MS
+
+                        if (!canRefreshRemote) {
+                            // Firestore listeners can burst many events in a short window.
+                            // Emit local cache to keep UI updated while avoiding quota-heavy remote storms.
+                            trySend(cache.loadGroups(userId))
+                            return
+                        }
+
+                        lastRemoteRefreshAtMs = now
                         val result = getGroups()
                         val groupsToDisplay = result.getOrElse { 
                             val local = cache.loadGroups(userId)
@@ -171,10 +184,8 @@ class GroupRepositoryImpl(
                     }
                 }
 
-                if (!connectivityStatus.isNetworkAvailable()) {
-                    val initialLocalGroups = cache.loadGroups(userId)
-                    trySend(initialLocalGroups)
-                }
+                val initialLocalGroups = cache.loadGroups(userId)
+                trySend(initialLocalGroups)
 
                 scope.launch {
                     refreshAndEmit()
@@ -222,6 +233,7 @@ class GroupRepositoryImpl(
             val anonymousUser = authSessionStore.getActiveUser()
             val command = PrepareGroupCreationCommand(name = name, currency = currency, imageUrl = imageUrl)
             var createdGroup: Group? = null
+            val creationStartMs = System.currentTimeMillis()
 
             for (attempt in 1..MAX_JOIN_CODE_ATTEMPTS) {
                 val candidate = prepareGroupCreationUseCase.execute(
@@ -232,12 +244,21 @@ class GroupRepositoryImpl(
                     return Result.failure(error)
                 }
 
+                android.util.Log.d(
+                    "GroupRepo",
+                    "createGroup attempt=$attempt joinCode=${candidate.joinCode}"
+                )
+
                 val created = createGroupWithReservedJoinCode(
                     group = candidate,
                     creatorUserId = authenticatedUserId
                 )
                 if (created) {
                     createdGroup = candidate
+                    android.util.Log.d(
+                        "GroupRepo",
+                        "createGroup reserved join code in ${System.currentTimeMillis() - creationStartMs}ms"
+                    )
                     break
                 }
             }
@@ -250,9 +271,33 @@ class GroupRepositoryImpl(
             cache.addUserToGroup(newGroup.id, authenticatedUserId)
             pendingSyncStore.removePendingGroupSync(newGroup.id)
 
+            android.util.Log.d(
+                "GroupRepo",
+                "createGroup success totalDurationMs=${System.currentTimeMillis() - creationStartMs}"
+            )
+
             Result.success(newGroup)
         } catch (e: Exception) {
-            Result.failure(e)
+            android.util.Log.e(
+                "GroupRepo",
+                "createGroup failed type=${e::class.java.simpleName} message=${e.message}",
+                e
+            )
+            if (
+                e is com.google.firebase.firestore.FirebaseFirestoreException &&
+                e.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED
+            ) {
+                return Result.failure(
+                    IllegalStateException("Service is temporarily busy (quota exceeded). Please try again later.")
+                )
+            }
+            if (e.message == JOIN_CODE_RESERVATION_TIMEOUT) {
+                Result.failure(
+                    IllegalStateException("Group creation timed out. Please check your connection and try again.")
+                )
+            } else {
+                Result.failure(e)
+            }
         }
     }
 
@@ -510,7 +555,8 @@ class GroupRepositoryImpl(
 
     private suspend fun createGroupWithReservedJoinCode(group: Group, creatorUserId: String): Boolean {
         return try {
-            withTimeoutOrNull(3000L) {
+            val attemptStartMs = System.currentTimeMillis()
+            withTimeoutOrNull(JOIN_CODE_RESERVATION_TIMEOUT_MS) {
                 val now = System.currentTimeMillis()
                 val groupRef = firestore.collection("groups").document(group.id)
                 val joinCodeRef = firestore.collection("group_join_codes").document(group.joinCode)
@@ -551,13 +597,31 @@ class GroupRepositoryImpl(
                         )
                     )
                 }.awaitTaskResult()
-            } ?: return false
+                android.util.Log.d(
+                    "GroupRepo",
+                    "createGroupWithReservedJoinCode success joinCode=${group.joinCode} durationMs=${System.currentTimeMillis() - attemptStartMs}"
+                )
+                true
+            } ?: run {
+                android.util.Log.w(
+                    "GroupRepo",
+                    "createGroupWithReservedJoinCode timeout joinCode=${group.joinCode} timeoutMs=$JOIN_CODE_RESERVATION_TIMEOUT_MS"
+                )
+                throw IllegalStateException(JOIN_CODE_RESERVATION_TIMEOUT)
+            }
 
-            true
         } catch (e: Exception) {
             if (e.message == JOIN_CODE_COLLISION) {
+                android.util.Log.d(
+                    "GroupRepo",
+                    "createGroupWithReservedJoinCode collision joinCode=${group.joinCode}"
+                )
                 return false
             }
+            android.util.Log.w(
+                "GroupRepo",
+                "createGroupWithReservedJoinCode failed joinCode=${group.joinCode} type=${e::class.java.simpleName} message=${e.message}"
+            )
             throw e
         }
     }
@@ -587,7 +651,7 @@ class GroupRepositoryImpl(
             reconcileDeletedRemoteGroups(localGroups)
 
             val remoteResult = runCatching {
-                val remoteGroups = withTimeoutOrNull(4000L) {
+                val remoteGroups = withTimeoutOrNull(2200L) {
                     fetchGroupsFromRemote(
                         userId = effectiveUserId,
                         knownLocalGroupIds = localGroups.map { it.id }
@@ -610,11 +674,18 @@ class GroupRepositoryImpl(
 
                 warmExpensesCache(remoteGroups.map { it.id })
                 remoteGroups
-            }.recoverCatching {
-                // Sign-out/sign-in can briefly race auth + rules propagation and return PERMISSION_DENIED.
-                // Retry once after a short delay before falling back to local cache.
-                delay(900)
-                val retriedRemoteGroups = withTimeoutOrNull(4000L) {
+            }.recoverCatching { error ->
+                // Keep UI snappy: only do a quick second attempt for transient auth/rules races.
+                val isPermissionRace =
+                    error is com.google.firebase.firestore.FirebaseFirestoreException &&
+                        error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED
+
+                if (!isPermissionRace) {
+                    throw error
+                }
+
+                delay(250)
+                val retriedRemoteGroups = withTimeoutOrNull(1500L) {
                     fetchGroupsFromRemote(
                         userId = effectiveUserId,
                         knownLocalGroupIds = localGroups.map { it.id }
@@ -1107,6 +1178,9 @@ class GroupRepositoryImpl(
 
     companion object {
         private const val MAX_JOIN_CODE_ATTEMPTS = 8
+        private const val OBSERVE_REMOTE_REFRESH_MIN_INTERVAL_MS = 1500L
+        private const val JOIN_CODE_RESERVATION_TIMEOUT_MS = 8000L
         private const val JOIN_CODE_COLLISION = "JOIN_CODE_COLLISION"
+        private const val JOIN_CODE_RESERVATION_TIMEOUT = "JOIN_CODE_RESERVATION_TIMEOUT"
     }
 }

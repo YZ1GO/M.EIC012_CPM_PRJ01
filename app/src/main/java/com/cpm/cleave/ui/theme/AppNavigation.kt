@@ -103,6 +103,7 @@ fun MainScreen(
     var openAuthInRegisterMode by remember { mutableStateOf(false) }
     var authFlowSessionKey by remember { mutableIntStateOf(0) }
     var groupsSessionKey by remember { mutableIntStateOf(0) }
+    var groupsRefreshNonce by remember { mutableIntStateOf(0) }
     var lastConsumedDeepLinkJoinCode by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
@@ -193,7 +194,11 @@ fun MainScreen(
                     key = "groups_flow_$groupsSessionKey",
                     factory = viewModelFactory { initializer { GroupsViewModel(GetGroupsUseCase(groupRepository)) } }
                 )
-                GroupsScreen(groupsViewModel = groupsViewModel, onGroupClick = { navController.navigate(NavScreen.GroupDetails.createRoute(it)) })
+                GroupsScreen(
+                    groupsViewModel = groupsViewModel,
+                    refreshNonce = groupsRefreshNonce,
+                    onGroupClick = { navController.navigate(NavScreen.GroupDetails.createRoute(it)) }
+                )
             }
             
             composable(NavScreen.Profile.route) {
@@ -262,7 +267,10 @@ fun MainScreen(
                 val vm: CreateGroupViewModel = viewModel(factory = viewModelFactory { initializer { CreateGroupViewModel(RequestCreateGroupUseCase(groupRepository)) } })
                 Column(Modifier.fillMaxSize()) {
                     MinimalistTopBar { navController.popBackStack() }
-                    CreateGroupScreen(vm) { groupsSessionKey++; navController.navigate(NavScreen.Groups.route) { popUpTo(navController.graph.startDestinationId); launchSingleTop = true } }
+                    CreateGroupScreen(vm) {
+                        groupsRefreshNonce++
+                        navController.popBackStack()
+                    }
                 }
             }
 
@@ -274,7 +282,10 @@ fun MainScreen(
                 LaunchedEffect(Unit) { vm.applyDeepLinkJoinCode(backStackEntry.arguments?.getString("joinCode")) }
                 Column(Modifier.fillMaxSize()) {
                     MinimalistTopBar { navController.popBackStack() }
-                    JoinGroupScreen(vm) { groupsSessionKey++; navController.navigate(NavScreen.Groups.route) { popUpTo(navController.graph.startDestinationId); launchSingleTop = true } }
+                    JoinGroupScreen(vm) {
+                        groupsRefreshNonce++
+                        navController.popBackStack()
+                    }
                 }
             }
 

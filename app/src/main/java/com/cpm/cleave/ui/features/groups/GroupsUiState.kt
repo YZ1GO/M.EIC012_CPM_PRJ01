@@ -6,5 +6,6 @@ data class GroupsUiState(
     val isLoading: Boolean = true,
     val groups: List<Group> = emptyList(),
     val searchQuery: String = "",
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val loadCompletionToken: Long = 0L
 )

@@ -31,7 +31,6 @@ class GroupsViewModel(
                 .catch { error ->
                     _uiState.update {
                         it.copy(
-                            isLoading = false,
                             errorMessage = error.message ?: "Could not load groups"
                         )
                     }
@@ -39,7 +38,6 @@ class GroupsViewModel(
                 .collect { observedGroups ->
                     _uiState.update {
                         it.copy(
-                            isLoading = false,
                             groups = observedGroups,
                             errorMessage = null
                         )
@@ -49,7 +47,15 @@ class GroupsViewModel(
     }
 
     fun loadGroups() {
-        _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+        val cachedGroups = _uiState.value.groups
+        val shouldBlockUi = cachedGroups.isEmpty()
+
+        _uiState.update {
+            it.copy(
+                isLoading = shouldBlockUi,
+                errorMessage = if (shouldBlockUi) null else it.errorMessage
+            )
+        }
 
         viewModelScope.launch {
             getGroupsUseCase.execute()
@@ -57,14 +63,25 @@ class GroupsViewModel(
                     _uiState.update {
                         it.copy(isLoading = false, groups = savedGroups, errorMessage = null)
                     }
+                    _uiState.update {
+                        it.copy(loadCompletionToken = System.currentTimeMillis())
+                    }
                 }
                 .onFailure { error ->
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            groups = emptyList(),
-                            errorMessage = error.message ?: "Could not load groups"
+                            // Keep cached groups visible if sync fails.
+                            groups = if (cachedGroups.isNotEmpty()) cachedGroups else emptyList(),
+                            errorMessage = if (cachedGroups.isEmpty()) {
+                                error.message ?: "Could not load groups"
+                            } else {
+                                null
+                            }
                         )
+                    }
+                    _uiState.update {
+                        it.copy(loadCompletionToken = System.currentTimeMillis())
                     }
                 }
         }
