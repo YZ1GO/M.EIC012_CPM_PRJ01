@@ -553,6 +553,27 @@ fun GroupDetailsScreen(
                 color = colorScheme.onSurfaceVariant,
                 fontSize = 13.sp
             )
+            val currentUserId = uiState.currentUserId
+            if (!currentUserId.isNullOrBlank()) {
+                val totalYouOwe = uiState.debts
+                    .filter { debt -> debt.fromUser == currentUserId }
+                    .sumOf { debt -> debt.amount }
+                val totalOwedToYou = uiState.debts
+                    .filter { debt -> debt.toUser == currentUserId }
+                    .sumOf { debt -> debt.amount }
+
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "You owe (total): ${"%.2f".format(Locale.getDefault(), totalYouOwe)}",
+                    color = colorScheme.onSurfaceVariant,
+                    fontSize = 13.sp
+                )
+                Text(
+                    text = "Owed to you (total): ${"%.2f".format(Locale.getDefault(), totalOwedToYou)}",
+                    color = colorScheme.onSurfaceVariant,
+                    fontSize = 13.sp
+                )
+            }
             Spacer(modifier = Modifier.height(6.dp))
 
             if (uiState.debtsWithReason.isEmpty()) {
