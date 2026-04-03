@@ -66,6 +66,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.cpm.cleave.R
 import com.cpm.cleave.model.Group
 import com.cpm.cleave.model.Expense
 import java.text.SimpleDateFormat
@@ -165,18 +166,14 @@ fun GroupListItem(group: Group, onClick: () -> Unit) {
                 .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.Center
         ) {
-            if (groupImageUrl != null) {
-                AsyncImage(
-                    model = groupImageUrl,
-                    contentDescription = "Group image",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                )
-            } else {
-                Text("?", fontSize = 32.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            AsyncImage(
+                model = groupImageUrl ?: R.drawable.default_group_image,
+                contentDescription = "Group image",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(8.dp))
+            )
         }
 
         Spacer(modifier = Modifier.width(16.dp))
