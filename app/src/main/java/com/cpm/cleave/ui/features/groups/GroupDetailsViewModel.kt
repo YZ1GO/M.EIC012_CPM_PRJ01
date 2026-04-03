@@ -3,6 +3,7 @@ package com.cpm.cleave.ui.features.groups
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cpm.cleave.domain.usecase.GetGroupDetailsUseCase
+import com.cpm.cleave.domain.usecase.RequestDeleteExpenseUseCase
 import com.cpm.cleave.domain.usecase.RequestDeleteGroupUseCase
 import com.cpm.cleave.domain.usecase.RequestExpelGroupMemberUseCase
 import kotlinx.coroutines.flow.catch
@@ -15,6 +16,7 @@ import kotlinx.coroutines.launch
 class GroupDetailsViewModel(
     private val groupId: String,
     private val getGroupDetailsUseCase: GetGroupDetailsUseCase,
+    private val requestDeleteExpenseUseCase: RequestDeleteExpenseUseCase,
     private val requestDeleteGroupUseCase: RequestDeleteGroupUseCase,
     private val requestExpelGroupMemberUseCase: RequestExpelGroupMemberUseCase
 ) : ViewModel() {
@@ -143,6 +145,55 @@ class GroupDetailsViewModel(
                 selectedMemberForExpulsionId = memberId,
                 errorMessage = null
             )
+        }
+    }
+
+    fun onExpenseLongPressed(expenseId: String) {
+        val currentState = _uiState.value
+        if (!currentState.canDeleteGroup) return
+        if (currentState.isDeletingExpense) return
+        if (expenseId.isBlank()) return
+
+        _uiState.update {
+            it.copy(
+                selectedExpenseForDeletionId = expenseId,
+                errorMessage = null
+            )
+        }
+    }
+
+    fun dismissExpenseDeletionDialog() {
+        if (_uiState.value.isDeletingExpense) return
+        _uiState.update { it.copy(selectedExpenseForDeletionId = null) }
+    }
+
+    fun confirmExpenseDeletion() {
+        val state = _uiState.value
+        val expenseId = state.selectedExpenseForDeletionId ?: return
+
+        if (state.isDeletingExpense || !state.canDeleteGroup) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isDeletingExpense = true, errorMessage = null) }
+
+            requestDeleteExpenseUseCase.execute(groupId = groupId, expenseId = expenseId)
+                .onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            isDeletingExpense = false,
+                            selectedExpenseForDeletionId = null
+                        )
+                    }
+                    refreshGroupData()
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            isDeletingExpense = false,
+                            errorMessage = error.message ?: "Could not delete expense"
+                        )
+                    }
+                }
         }
     }
 

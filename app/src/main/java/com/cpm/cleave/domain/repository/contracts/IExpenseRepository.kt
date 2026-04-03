@@ -11,6 +11,7 @@ interface IExpenseRepository {
     suspend fun getExpenseSharesByGroup(groupId: String): Result<Map<String, List<ExpenseShare>>>
     fun observeExpensesByGroup(groupId: String): Flow<List<Expense>>
     suspend fun getDebtsByGroup(groupId: String): Result<List<Debt>>
+    suspend fun deleteExpense(groupId: String, expenseId: String): Result<Unit>
     suspend fun createExpense(
         groupId: String,
         amount: Double,

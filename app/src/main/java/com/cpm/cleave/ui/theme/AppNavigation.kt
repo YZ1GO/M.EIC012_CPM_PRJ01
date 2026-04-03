@@ -232,6 +232,7 @@ fun MainScreen(
                             GroupDetailsViewModel(
                                 groupId = id, 
                                 getGroupDetailsUseCase = GetGroupDetailsUseCase(groupRepository, expenseRepository, authRepository), 
+                                requestDeleteExpenseUseCase = RequestDeleteExpenseUseCase(expenseRepository),
                                 requestDeleteGroupUseCase = RequestDeleteGroupUseCase(groupRepository),
                                 requestExpelGroupMemberUseCase = RequestExpelGroupMemberUseCase(groupRepository)
                             ) 

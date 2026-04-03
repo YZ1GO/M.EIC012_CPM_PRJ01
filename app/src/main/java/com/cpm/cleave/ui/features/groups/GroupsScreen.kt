@@ -375,6 +375,47 @@ fun GroupDetailsScreen(
             )
         }
 
+        uiState.selectedExpenseForDeletionId?.let { expenseId ->
+            val expenseName = uiState.expenses.firstOrNull { it.id == expenseId }
+                ?.description
+                ?.ifBlank { "this expense" }
+                ?: "this expense"
+
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissExpenseDeletionDialog() },
+                title = { Text("Delete expense") },
+                text = {
+                    Column {
+                        Text("Are you sure you want to delete $expenseName? This action cannot be undone.")
+                        uiState.errorMessage?.let { message ->
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = message,
+                                color = MaterialTheme.colorScheme.error,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { viewModel.dismissExpenseDeletionDialog() },
+                        enabled = !uiState.isDeletingExpense
+                    ) {
+                        Text("Cancel")
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = { viewModel.confirmExpenseDeletion() },
+                        enabled = !uiState.isDeletingExpense
+                    ) {
+                        Text(if (uiState.isDeletingExpense) "Deleting..." else "Delete")
+                    }
+                }
+            )
+        }
+
         selectedReceiptUrl?.let { receiptUrl ->
             ReceiptImageDialog(
                 receiptUrl = receiptUrl,
@@ -439,6 +480,11 @@ fun GroupDetailsScreen(
                     ExpenseDetailsItem(
                         expense = expense,
                         userDisplayNames = uiState.userDisplayNames,
+                        onLongPress = if (uiState.canDeleteGroup) {
+                            { viewModel.onExpenseLongPressed(expense.id) }
+                        } else {
+                            null
+                        },
                         onViewReceipt = { receiptUrl ->
                             selectedReceiptUrl = receiptUrl
                         }
@@ -600,6 +646,7 @@ private fun generateQrBitmap(content: String, size: Int): Bitmap? {
 private fun ExpenseDetailsItem(
     expense: Expense,
     userDisplayNames: Map<String, String>,
+    onLongPress: (() -> Unit)? = null,
     onViewReceipt: (String) -> Unit
 ) {
     val desc = expense.description.ifBlank { "(No description)" }
@@ -618,6 +665,15 @@ private fun ExpenseDetailsItem(
             .padding(vertical = 6.dp)
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
+            .then(
+                if (onLongPress != null) {
+                    Modifier.pointerInput(onLongPress) {
+                        detectTapGestures(onLongPress = { onLongPress() })
+                    }
+                } else {
+                    Modifier
+                }
+            )
             .padding(12.dp)
     ) {
         Row(

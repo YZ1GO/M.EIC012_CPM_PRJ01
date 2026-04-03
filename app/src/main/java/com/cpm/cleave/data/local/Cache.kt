@@ -325,6 +325,15 @@ class Cache(context: Context) {
         expenseDao.updateExpenseImagePath(expenseId, imagePath)
     }
 
+    suspend fun deleteExpenseWithRelations(expenseId: String) {
+        database.withTransaction {
+            expenseSplitDao.deleteSplitsForExpense(expenseId)
+            expensePayerDao.deletePayersForExpense(expenseId)
+            val expense = expenseDao.getExpenseById(expenseId) ?: return@withTransaction
+            expenseDao.deleteExpense(expense)
+        }
+    }
+
     suspend fun addUserToGroup(groupId: String, userId: String): Boolean {
         val insertResult = groupMemberDao.addMember(
             GroupMemberEntity(

@@ -224,6 +224,42 @@ class ExpenseRepositoryImpl(
         }
     }
 
+    override suspend fun deleteExpense(groupId: String, expenseId: String): Result<Unit> {
+        return try {
+            val localExpense = cache.getExpenseById(expenseId)
+                ?: return Result.success(Unit)
+
+            val isPendingLocalOnly = pendingSyncStore.getPendingExpenseSyncs()
+                .any { pending -> pending.groupId == groupId && pending.expenseId == expenseId }
+
+            if (!isPendingLocalOnly && !connectivityStatus.isNetworkAvailable()) {
+                return Result.failure(
+                    IllegalStateException("Deleting an expense requires an internet connection.")
+                )
+            }
+
+            if (!isPendingLocalOnly) {
+                syncExpenseDeletionToRemote(groupId = groupId, expenseId = expenseId)
+            }
+
+            cache.deleteExpenseWithRelations(expenseId)
+            pendingSyncStore.removePendingExpenseSync(groupId, expenseId)
+
+            localExpense.imagePath
+                ?.takeIf { it.isLocalReceiptPath() }
+                ?.let { localPath ->
+                    localReceiptFileFromPath(localPath)?.let { file ->
+                        runCatching { file.delete() }
+                    }
+                }
+
+            localExpenseRefreshEvents.tryEmit(groupId)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     override suspend fun createExpense(
         groupId: String,
         amount: Double,
@@ -503,6 +539,37 @@ class ExpenseRepositoryImpl(
             }
         }
 
+        batch.commit().awaitTaskResult()
+    }
+
+    private suspend fun syncExpenseDeletionToRemote(groupId: String, expenseId: String) {
+        val now = System.currentTimeMillis()
+        val groupRef = firestore.collection("groups").document(groupId)
+        val expenseRef = groupRef.collection("expenses").document(expenseId)
+
+        val payersSnapshot = expenseRef.collection("payers")
+            .get()
+            .awaitTaskResult()
+        val splitsSnapshot = expenseRef.collection("splits")
+            .get()
+            .awaitTaskResult()
+
+        val batch = firestore.batch()
+
+        payersSnapshot.documents.forEach { payerDoc ->
+            batch.delete(payerDoc.reference)
+        }
+
+        splitsSnapshot.documents.forEach { splitDoc ->
+            batch.delete(splitDoc.reference)
+        }
+
+        batch.delete(expenseRef)
+        batch.set(
+            groupRef,
+            mapOf("updatedAt" to now),
+            SetOptions.merge()
+        )
         batch.commit().awaitTaskResult()
     }
 

@@ -13,6 +13,8 @@ data class GroupDetailsUiState(
     val debtsWithReason: List<DebtWithReason> = emptyList(),
     val userDisplayNames: Map<String, String> = emptyMap(),
     val userPhotoUrls: Map<String, String> = emptyMap(),
+    val selectedExpenseForDeletionId: String? = null,
+    val isDeletingExpense: Boolean = false,
     val selectedMemberForExpulsionId: String? = null,
     val isExpellingMember: Boolean = false,
     val canDeleteGroup: Boolean = false,
