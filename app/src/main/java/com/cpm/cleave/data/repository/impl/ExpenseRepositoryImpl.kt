@@ -36,6 +36,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 import java.net.HttpURLConnection
@@ -57,6 +58,16 @@ class ExpenseRepositoryImpl(
     private val createExpenseUseCase: CreateExpenseUseCase = CreateExpenseUseCase(),
     private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
 ) : IExpenseRepository {
+
+    private data class PendingExpensePayload(
+        val amount: Double,
+        val description: String,
+        val date: Long,
+        val splitMemberIds: List<String>,
+        val payerContributions: Map<String, Double>,
+        val imagePath: String?,
+        val receiptItems: List<ReceiptItem>
+    )
 
     private val localExpenseRefreshEvents = MutableSharedFlow<String>(extraBufferCapacity = 64)
 
@@ -323,10 +334,21 @@ class ExpenseRepositoryImpl(
                 receiptItems = receiptItems
             )
 
+            val pendingPayloadJson = buildPendingExpensePayloadJson(
+                amount = amount,
+                description = description,
+                date = now,
+                splitMemberIds = splitMemberIds,
+                payerContributions = normalizedContributions,
+                imagePath = receiptImagePath,
+                receiptItems = receiptItems
+            )
+
             localExpenseRefreshEvents.tryEmit(groupId)
 
             if (!connectivityStatus.isNetworkAvailable()) {
                 pendingSyncStore.addPendingExpenseSync(groupId, expenseId)
+                pendingSyncStore.setPendingExpenseSyncPayload(groupId, expenseId, pendingPayloadJson)
                 return Result.success(Unit)
             }
 
@@ -351,6 +373,7 @@ class ExpenseRepositoryImpl(
                 pendingSyncStore.removePendingExpenseSync(groupId, expenseId)
             } else {
                 pendingSyncStore.addPendingExpenseSync(groupId, expenseId)
+                pendingSyncStore.setPendingExpenseSyncPayload(groupId, expenseId, pendingPayloadJson)
             }
 
             Result.success(Unit)
@@ -381,33 +404,54 @@ class ExpenseRepositoryImpl(
         }
 
         pendingSyncStore.getPendingExpenseSyncs().forEach { pending ->
-            val localExpense = cache.getExpenseById(pending.expenseId) ?: run {
-                pendingSyncStore.removePendingExpenseSync(pending.groupId, pending.expenseId)
+            val localExpense = cache.getExpenseById(pending.expenseId)
+            val payload = if (localExpense == null) {
+                pendingSyncStore.getPendingExpenseSyncPayload(pending.groupId, pending.expenseId)
+                    ?.let { decodePendingExpensePayloadJson(it) }
+            } else {
+                null
+            }
+
+            if (localExpense == null && payload == null) {
+                // Keep pending. Without a local row or payload snapshot we cannot safely sync yet.
                 return@forEach
             }
-            val shares = cache.getExpenseSharesForExpense(localExpense.id)
-            val payers = localExpense.payerContributions.ifEmpty {
-                listOf(PayerContribution(userId = localExpense.paidByUserId, amount = localExpense.amount))
-            }
+
+            val syncExpenseId = localExpense?.id ?: pending.expenseId
+            val syncAmount = localExpense?.amount ?: payload!!.amount
+            val syncDescription = localExpense?.description ?: payload!!.description
+            val syncDate = localExpense?.date ?: payload!!.date
+            val syncSplitMemberIds = localExpense
+                ?.let { expense -> cache.getExpenseSharesForExpense(expense.id).map { it.userId } }
+                ?: payload!!.splitMemberIds
+            val syncPayerContributions = localExpense
+                ?.payerContributions
+                ?.ifEmpty {
+                    listOf(PayerContribution(userId = localExpense.paidByUserId, amount = localExpense.amount))
+                }
+                ?.associate { it.userId to it.amount }
+                ?: payload!!.payerContributions
+            val syncReceiptItems = localExpense?.receiptItems ?: payload!!.receiptItems
+            val sourceImagePath = localExpense?.imagePath ?: payload!!.imagePath
 
             val syncedImagePath = resolveImagePathForSync(
                 groupId = pending.groupId,
-                expenseId = localExpense.id,
-                currentImagePath = localExpense.imagePath
+                expenseId = syncExpenseId,
+                currentImagePath = sourceImagePath
             )
 
             val syncSucceeded = runCatching {
                 withTimeoutOrNull(4000L) {
                     syncExpenseToRemote(
-                        expenseId = localExpense.id,
+                        expenseId = syncExpenseId,
                         groupId = pending.groupId,
-                        amount = localExpense.amount,
-                        description = localExpense.description,
-                        date = localExpense.date,
-                        splitMemberIds = shares.map { it.userId },
-                        payerContributions = payers.associate { it.userId to it.amount },
+                        amount = syncAmount,
+                        description = syncDescription,
+                        date = syncDate,
+                        splitMemberIds = syncSplitMemberIds,
+                        payerContributions = syncPayerContributions,
                         imagePath = syncedImagePath,
-                        receiptItems = localExpense.receiptItems
+                        receiptItems = syncReceiptItems
                     )
                     true
                 } ?: false
@@ -709,6 +753,93 @@ class ExpenseRepositoryImpl(
 
     private fun String?.isLocalReceiptPath(): Boolean {
         return this?.startsWith("file://") == true
+    }
+
+    private fun buildPendingExpensePayloadJson(
+        amount: Double,
+        description: String,
+        date: Long,
+        splitMemberIds: List<String>,
+        payerContributions: Map<String, Double>,
+        imagePath: String?,
+        receiptItems: List<ReceiptItem>
+    ): String {
+        val json = JSONObject().apply {
+            put("amount", amount)
+            put("description", description)
+            put("date", date)
+            put("splitMemberIds", JSONArray().apply {
+                splitMemberIds.forEach { memberId -> put(memberId) }
+            })
+            put("payerContributions", JSONObject().apply {
+                payerContributions.forEach { (userId, contribution) -> put(userId, contribution) }
+            })
+            if (!imagePath.isNullOrBlank()) {
+                put("imagePath", imagePath)
+            }
+            put("receiptItems", JSONArray().apply {
+                receiptItems.forEach { item ->
+                    put(
+                        JSONObject().apply {
+                            put("name", item.name)
+                            put("amount", item.amount)
+                            if (item.quantity != null) put("quantity", item.quantity)
+                            if (item.unitPrice != null) put("unitPrice", item.unitPrice)
+                        }
+                    )
+                }
+            })
+        }
+        return json.toString()
+    }
+
+    private fun decodePendingExpensePayloadJson(payloadJson: String): PendingExpensePayload? {
+        return runCatching {
+            val json = JSONObject(payloadJson)
+            val splitMemberIds = buildList {
+                val membersArray = json.optJSONArray("splitMemberIds") ?: JSONArray()
+                for (index in 0 until membersArray.length()) {
+                    val memberId = membersArray.optString(index).trim()
+                    if (memberId.isNotBlank()) add(memberId)
+                }
+            }
+            val payerContributions = buildMap {
+                val payersJson = json.optJSONObject("payerContributions") ?: JSONObject()
+                val keys = payersJson.keys()
+                while (keys.hasNext()) {
+                    val userId = keys.next()
+                    val contribution = payersJson.optDouble(userId, 0.0)
+                    if (userId.isNotBlank() && contribution > 0.0) {
+                        put(userId, contribution)
+                    }
+                }
+            }
+            val receiptItems = buildList {
+                val itemsArray = json.optJSONArray("receiptItems") ?: JSONArray()
+                for (index in 0 until itemsArray.length()) {
+                    val itemJson = itemsArray.optJSONObject(index) ?: continue
+                    val name = itemJson.optString("name").trim()
+                    val amount = itemJson.optDouble("amount", 0.0)
+                    val quantity = itemJson.optDouble("quantity", Double.NaN)
+                        .takeUnless { it.isNaN() || it <= 0.0 }
+                    val unitPrice = itemJson.optDouble("unitPrice", Double.NaN)
+                        .takeUnless { it.isNaN() || it <= 0.0 }
+                    if (name.isNotBlank() && amount > 0.0) {
+                        add(ReceiptItem(name = name, amount = amount, quantity = quantity, unitPrice = unitPrice))
+                    }
+                }
+            }
+
+            PendingExpensePayload(
+                amount = json.optDouble("amount", 0.0),
+                description = json.optString("description"),
+                date = json.optLong("date", 0L),
+                splitMemberIds = splitMemberIds,
+                payerContributions = payerContributions,
+                imagePath = json.optString("imagePath").takeIf { it.isNotBlank() },
+                receiptItems = receiptItems
+            )
+        }.getOrNull()
     }
 
     private fun decodeReceiptItemsField(raw: Any?): List<ReceiptItem> {
