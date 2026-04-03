@@ -170,7 +170,9 @@ fun GroupListItem(group: Group, onClick: () -> Unit) {
                     model = groupImageUrl,
                     contentDescription = "Group image",
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.size(64.dp)
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(RoundedCornerShape(8.dp))
                 )
             } else {
                 Text("?", fontSize = 32.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
