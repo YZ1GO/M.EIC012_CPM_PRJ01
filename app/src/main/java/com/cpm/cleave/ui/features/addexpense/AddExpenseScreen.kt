@@ -1,9 +1,13 @@
 package com.cpm.cleave.ui.features.addexpense
 
+import android.Manifest
+import android.content.Intent
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -49,6 +53,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.rememberScrollState
+import androidx.core.content.ContextCompat
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
@@ -66,6 +71,8 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
     val colorScheme = MaterialTheme.colorScheme
     var receiptBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var currentReceiptUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingReceiptCapture by remember { mutableStateOf(false) }
+    var cameraPermissionDeniedMessage by remember { mutableStateOf<String?>(null) }
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
@@ -75,6 +82,91 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
         receiptBitmap = prepared?.first
         viewModel.onReceiptImageSelected(prepared?.second)
     }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (!granted) {
+            pendingReceiptCapture = false
+            cameraPermissionDeniedMessage = "Camera permission is required to capture a receipt"
+            return@rememberLauncherForActivityResult
+        }
+
+        if (!pendingReceiptCapture) return@rememberLauncherForActivityResult
+        pendingReceiptCapture = false
+        cameraPermissionDeniedMessage = null
+
+        val imageUri = createReceiptImageUri(context)
+        if (imageUri == null) {
+            viewModel.setErrorMessage("Could not prepare a receipt image file")
+            return@rememberLauncherForActivityResult
+        }
+
+        currentReceiptUri = imageUri
+        runCatching {
+            cameraLauncher.launch(imageUri)
+        }.onFailure {
+            viewModel.setErrorMessage("Could not open the camera")
+        }
+    }
+
+    cameraPermissionDeniedMessage?.let { message ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(colorScheme.surfaceVariant.copy(alpha = 0.28f), RoundedCornerShape(20.dp))
+                    .border(1.dp, colorScheme.outlineVariant.copy(alpha = 0.7f), RoundedCornerShape(20.dp))
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Camera permission needed",
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = message,
+                    color = colorScheme.onSurfaceVariant,
+                    fontSize = 14.sp
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+                Button(
+                    onClick = {
+                        val settingsIntent = Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.fromParts("package", context.packageName, null)
+                        )
+                        context.startActivity(settingsIntent)
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primary),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Open app settings")
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(
+                    onClick = {
+                        cameraPermissionDeniedMessage = null
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = colorScheme.tertiaryContainer),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Back to expense")
+                }
+            }
+        }
+        return
+    }
+
     val labelForMember: (String) -> String = { memberId ->
         uiState.memberDisplayNames[memberId] ?: memberId
     }
@@ -140,9 +232,28 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
 
             Button(
                 onClick = {
-                    val imageUri = createReceiptImageUri(context) ?: return@Button
+                    val hasCameraPermission = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.CAMERA
+                    ) == PackageManager.PERMISSION_GRANTED
+
+                    if (!hasCameraPermission) {
+                        pendingReceiptCapture = true
+                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                        return@Button
+                    }
+
+                    val imageUri = createReceiptImageUri(context) ?: run {
+                        viewModel.setErrorMessage("Could not prepare a receipt image file")
+                        return@Button
+                    }
+
                     currentReceiptUri = imageUri
-                    cameraLauncher.launch(imageUri)
+                    runCatching {
+                        cameraLauncher.launch(imageUri)
+                    }.onFailure {
+                        viewModel.setErrorMessage("Could not open the camera")
+                    }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = colorScheme.secondaryContainer),
                 shape = RoundedCornerShape(8.dp)

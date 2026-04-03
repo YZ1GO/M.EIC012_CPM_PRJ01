@@ -103,6 +103,10 @@ class AddExpenseViewModel(
         }
     }
 
+    fun setErrorMessage(message: String) {
+        _uiState.update { it.copy(errorMessage = message) }
+    }
+
     fun extractTotalFromReceipt() {
         val imageBytes = receiptImageBytes
         if (imageBytes == null) {
