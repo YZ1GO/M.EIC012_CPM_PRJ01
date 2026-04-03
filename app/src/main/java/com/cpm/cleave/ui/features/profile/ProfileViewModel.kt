@@ -89,9 +89,11 @@ class ProfileViewModel(
     }
 
     fun onSaveProfilePhotoClicked() {
+        val isDeleting = _uiState.value.pendingPhotoUri == ""
         val imageBytes = selectedPhotoBytes
-        if (imageBytes == null) {
-            _uiState.update { it.copy(errorMessage = "Please choose a photo first") }
+
+        // If we aren't deleting, and we don't have bytes to upload, abort cleanly.
+        if (!isDeleting && imageBytes == null) {
             return
         }
 
@@ -103,18 +105,28 @@ class ProfileViewModel(
                 )
             }
 
-            repository.updateProfilePhoto(imageBytes)
+            // Route to the correct repository action based on user intent
+            val result = if (isDeleting) {
+                repository.removeProfilePicture()
+            } else {
+                repository.updateProfilePhoto(imageBytes!!)
+            }
+
+            result
                 .onSuccess { updatedUser ->
                     selectedPhotoBytes = null
                     _uiState.update {
                         it.copy(
                             isUploadingPhoto = false,
-                            pendingPhotoUri = null,
+                            pendingPhotoUri = null, // Clear pending state
                             currentUser = updatedUser,
                             errorMessage = null
                         )
                     }
-                    _uiEffect.emit(ProfileUiEffect.ProfilePhotoSaved)
+                    
+                    // Show a dynamic toast based on the action
+                    val successMsg = if (isDeleting) "Profile photo removed" else "Profile photo updated"
+                    _uiEffect.emit(ProfileUiEffect.ShowMessage(successMsg))
                 }
                 .onFailure { error ->
                     val message = error.message ?: "Could not update profile photo"

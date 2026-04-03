@@ -337,6 +337,30 @@ override suspend fun signUpWithEmail(
         }
     }
 
+    override suspend fun removeProfilePicture(): Result<User> {
+        return runCatching {
+            val firebaseUser = firebaseAuth.currentUser
+                ?: throw IllegalStateException("No signed-in user")
+
+            firebaseUser.updateProfile(
+                UserProfileChangeRequest.Builder()
+                    .setPhotoUri(null)
+                    .build()
+            ).awaitTaskResult()
+
+            ensureUserDocument(
+                uid = firebaseUser.uid,
+                name = firebaseUser.displayName ?: firebaseUser.email?.substringBefore("@") ?: "User",
+                email = firebaseUser.email,
+                isAnonymous = firebaseUser.isAnonymous,
+                photoUrl = null
+            )
+
+            authSessionStore.updateUserPhotoUrl(firebaseUser.uid, null)
+                ?: firebaseUser.toDomainUser().copy(photoUrl = null)
+        }
+    }
+
     private suspend fun ensureUserDocument(
         uid: String,
         name: String,
