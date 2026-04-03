@@ -35,7 +35,10 @@ class PendingSyncStore(context: Context) {
         val token = expenseToken(groupId, expenseId)
         val updated = prefs.getStringSet(KEY_PENDING_EXPENSE_SYNCS, emptySet()).orEmpty().toMutableSet()
         if (updated.remove(token)) {
-            prefs.edit().putStringSet(KEY_PENDING_EXPENSE_SYNCS, updated).apply()
+            prefs.edit()
+                .putStringSet(KEY_PENDING_EXPENSE_SYNCS, updated)
+                .remove(expensePayloadKey(token))
+                .apply()
         }
     }
 
@@ -50,6 +53,19 @@ class PendingSyncStore(context: Context) {
                 if (groupId.isBlank() || expenseId.isBlank()) return@mapNotNull null
                 PendingExpenseSync(groupId = groupId, expenseId = expenseId)
             }
+    }
+
+    fun setPendingExpenseSyncPayload(groupId: String, expenseId: String, payloadJson: String) {
+        if (groupId.isBlank() || expenseId.isBlank()) return
+        val token = expenseToken(groupId, expenseId)
+        prefs.edit()
+            .putString(expensePayloadKey(token), payloadJson)
+            .apply()
+    }
+
+    fun getPendingExpenseSyncPayload(groupId: String, expenseId: String): String? {
+        val token = expenseToken(groupId, expenseId)
+        return prefs.getString(expensePayloadKey(token), null)
     }
 
     fun addPendingExpenseDeletion(groupId: String, expenseId: String) {
@@ -85,6 +101,10 @@ class PendingSyncStore(context: Context) {
         return "$groupId$TOKEN_SEPARATOR$expenseId"
     }
 
+    private fun expensePayloadKey(token: String): String {
+        return "$KEY_PENDING_EXPENSE_PAYLOAD_PREFIX$token"
+    }
+
     data class PendingExpenseSync(
         val groupId: String,
         val expenseId: String
@@ -95,6 +115,7 @@ class PendingSyncStore(context: Context) {
         private const val KEY_PENDING_GROUP_SYNCS = "pending_group_syncs"
         private const val KEY_PENDING_EXPENSE_SYNCS = "pending_expense_syncs"
         private const val KEY_PENDING_EXPENSE_DELETIONS = "pending_expense_deletions"
+        private const val KEY_PENDING_EXPENSE_PAYLOAD_PREFIX = "pending_expense_payload::"
         private const val TOKEN_SEPARATOR = "::"
     }
 }
