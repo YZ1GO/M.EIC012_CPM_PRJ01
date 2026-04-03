@@ -133,7 +133,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
     ) {
         Spacer(modifier = Modifier.height(titleTopSpacing))
         Text(
-            text = "Add Expense",
+            text = if (uiState.isEditing) "Edit Expense" else "Add Expense",
             fontSize = 24.sp,
             fontWeight = FontWeight.SemiBold
         )
@@ -549,7 +549,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
         }
 
         Button(
-            onClick = { viewModel.createExpense(onSuccess = onNavigateBack) },
+            onClick = { viewModel.submitExpense(onSuccess = onNavigateBack) },
             colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primary),
             shape = RoundedCornerShape(8.dp),
             enabled = !uiState.isLoading,
@@ -557,7 +557,9 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                 .fillMaxWidth()
                 .height(48.dp)
         ) {
-            Text(if (uiState.isLoading) "Creating..." else "Create Expense")
+            val actionText = if (uiState.isEditing) "Save Changes" else "Create Expense"
+            val loadingText = if (uiState.isEditing) "Saving..." else "Creating..."
+            Text(if (uiState.isLoading) loadingText else actionText)
         }
     }
 }

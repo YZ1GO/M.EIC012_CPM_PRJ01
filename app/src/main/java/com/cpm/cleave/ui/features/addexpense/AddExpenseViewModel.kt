@@ -4,8 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cpm.cleave.domain.repository.contracts.IAuthRepository
 import com.cpm.cleave.domain.repository.contracts.IScannerRepository
+import com.cpm.cleave.domain.usecase.GetEditableExpenseUseCase
 import com.cpm.cleave.domain.usecase.GetAddExpenseMembersUseCase
 import com.cpm.cleave.domain.usecase.RequestCreateExpenseUseCase
+import com.cpm.cleave.domain.usecase.RequestUpdateExpenseUseCase
 import com.cpm.cleave.model.ReceiptItem
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,7 +21,10 @@ class AddExpenseViewModel(
     private val scannerRepository: IScannerRepository,
     private val getAddExpenseMembersUseCase: GetAddExpenseMembersUseCase,
     private val requestCreateExpenseUseCase: RequestCreateExpenseUseCase,
-    private val groupId: String
+    private val requestUpdateExpenseUseCase: RequestUpdateExpenseUseCase,
+    private val getEditableExpenseUseCase: GetEditableExpenseUseCase,
+    private val groupId: String,
+    private val editingExpenseId: String? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AddExpenseUiState())
@@ -49,6 +54,8 @@ class AddExpenseViewModel(
                     }
                     _uiState.update {
                         it.copy(
+                            isEditing = !editingExpenseId.isNullOrBlank(),
+                            editingExpenseId = editingExpenseId,
                             availablePayers = members,
                             memberDisplayNames = memberDisplayNames,
                             buyerMode = BuyerMode.SINGLE_BUYER,
@@ -58,6 +65,10 @@ class AddExpenseViewModel(
                             selectedSplitMemberIds = members.toSet()
                         )
                     }
+
+                    if (!editingExpenseId.isNullOrBlank()) {
+                        loadExpenseForEditing(groupMembers = members)
+                    }
                 }
                 .onFailure { error ->
                     _uiState.update {
@@ -65,6 +76,78 @@ class AddExpenseViewModel(
                     }
                 }
         }
+    }
+
+    private fun loadExpenseForEditing(groupMembers: List<String>) {
+        val expenseId = editingExpenseId ?: return
+        viewModelScope.launch {
+            getEditableExpenseUseCase.execute(groupId = groupId, expenseId = expenseId)
+                .onSuccess { editable ->
+                    val expense = editable.expense
+                    val contributions = expense.payerContributions
+                        .filter { contribution -> contribution.userId in groupMembers && contribution.amount > 0.0 }
+
+                    val selectedPayers = if (contributions.isNotEmpty()) {
+                        contributions.map { it.userId }.toSet()
+                    } else {
+                        val fallback = expense.paidByUserId.takeIf { it in groupMembers }
+                        if (fallback != null) setOf(fallback) else emptySet()
+                    }
+
+                    val primaryPayer = contributions.maxByOrNull { it.amount }?.userId
+                        ?: expense.paidByUserId.takeIf { it in groupMembers }
+                        ?: groupMembers.firstOrNull().orEmpty()
+
+                    val contributionMap = if (contributions.isNotEmpty()) {
+                        contributions.associate { contribution ->
+                            contribution.userId to formatAmountInput(contribution.amount)
+                        }
+                    } else if (primaryPayer.isNotBlank()) {
+                        mapOf(primaryPayer to formatAmountInput(expense.amount))
+                    } else {
+                        emptyMap()
+                    }
+
+                    val splitMembers = editable.splitMemberIds
+                        .filter { memberId -> memberId in groupMembers }
+                        .toSet()
+                    val enforcedSplitMembers = splitMembers + selectedPayers
+                    val splitSelection = if (enforcedSplitMembers.isNotEmpty()) {
+                        enforcedSplitMembers
+                    } else {
+                        groupMembers.toSet()
+                    }
+                    val useAllMembersSplit = splitSelection.size == groupMembers.size
+
+                    _uiState.update {
+                        it.copy(
+                            isEditing = true,
+                            editingExpenseId = expense.id,
+                            amountInput = formatAmountInput(expense.amount),
+                            description = expense.description,
+                            buyerMode = if (selectedPayers.size <= 1) BuyerMode.SINGLE_BUYER else BuyerMode.SELECT_BUYERS,
+                            primaryBuyerId = primaryPayer,
+                            selectedPayerIds = selectedPayers,
+                            payerAmountInputs = contributionMap,
+                            splitMode = if (useAllMembersSplit) SplitMode.ALL_MEMBERS else SplitMode.SELECTED_MEMBERS,
+                            selectedSplitMemberIds = splitSelection,
+                            hasReceiptImage = !expense.imagePath.isNullOrBlank(),
+                            detectedReceiptItems = expense.receiptItems,
+                            receiptMessage = "Editing existing expense",
+                            errorMessage = null
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(errorMessage = error.message ?: "Could not load expense for editing")
+                    }
+                }
+        }
+    }
+
+    private fun formatAmountInput(value: Double): String {
+        return String.format(Locale.US, "%.2f", value).trimEnd('0').trimEnd('.')
     }
 
     fun onAmountChanged(value: String) {
@@ -342,7 +425,7 @@ class AddExpenseViewModel(
         }
     }
 
-    fun createExpense(onSuccess: () -> Unit) {
+    fun submitExpense(onSuccess: () -> Unit) {
         val state = _uiState.value
         if (state.isLoading) return
 
@@ -424,32 +507,50 @@ class AddExpenseViewModel(
             }
 
             _uiState.update { it.copy(isLoading = true) }
-            requestCreateExpenseUseCase.execute(
-                groupId = groupId,
-                amount = amount,
-                description = state.description,
-                splitMemberIds = splitMemberIds,
-                payerContributions = payerContributions,
-                receiptImageBytes = receiptImageBytes,
-                receiptItems = state.detectedReceiptItems
-                    .mapNotNull { item ->
-                        val name = item.name.trim()
-                        if (name.isBlank() || item.amount <= 0.0) null
-                        else ReceiptItem(
-                            name = name,
-                            amount = item.amount,
-                            quantity = item.quantity?.takeIf { it > 0.0 } ?: 1.0,
-                            unitPrice = item.unitPrice
-                        )
-                    }
-            ).onSuccess {
+            val normalizedReceiptItems = state.detectedReceiptItems
+                .mapNotNull { item ->
+                    val name = item.name.trim()
+                    if (name.isBlank() || item.amount <= 0.0) null
+                    else ReceiptItem(
+                        name = name,
+                        amount = item.amount,
+                        quantity = item.quantity?.takeIf { it > 0.0 } ?: 1.0,
+                        unitPrice = item.unitPrice
+                    )
+                }
+
+            val editingId = state.editingExpenseId
+            val operationResult = if (state.isEditing && !editingId.isNullOrBlank()) {
+                requestUpdateExpenseUseCase.execute(
+                    groupId = groupId,
+                    expenseId = editingId,
+                    amount = amount,
+                    description = state.description,
+                    splitMemberIds = splitMemberIds,
+                    payerContributions = payerContributions,
+                    receiptImageBytes = receiptImageBytes,
+                    receiptItems = normalizedReceiptItems
+                )
+            } else {
+                requestCreateExpenseUseCase.execute(
+                    groupId = groupId,
+                    amount = amount,
+                    description = state.description,
+                    splitMemberIds = splitMemberIds,
+                    payerContributions = payerContributions,
+                    receiptImageBytes = receiptImageBytes,
+                    receiptItems = normalizedReceiptItems
+                )
+            }
+
+            operationResult.onSuccess {
                 _uiState.update { it.copy(isLoading = false) }
                 onSuccess()
             }.onFailure { error ->
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        errorMessage = error.message ?: "Could not create expense"
+                        errorMessage = error.message ?: if (state.isEditing) "Could not update expense" else "Could not create expense"
                     )
                 }
             }
