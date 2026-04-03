@@ -220,6 +220,7 @@ class GroupRepositoryImpl(
             }
 
             val newGroup = createdGroup
+                ?.copy(ownerId = authenticatedUserId)
                 ?: return Result.failure(IllegalStateException("Could not reserve a unique join code."))
 
             cache.insertGroup(newGroup)
@@ -247,6 +248,75 @@ class GroupRepositoryImpl(
                 endpointUrl = "$baseUrl/group-images/upload",
                 payload = payload
             )
+        }
+    }
+
+    override suspend fun deleteGroup(groupId: String): Result<Unit> {
+        return runCatching {
+            if (!connectivityStatus.isNetworkAvailable()) {
+                throw IllegalStateException("Deleting a group requires an internet connection.")
+            }
+
+            val currentUserId = firebaseAuth.currentUser?.uid
+                ?: throw IllegalStateException("No authenticated Firebase user found.")
+
+            val remoteGroup = fetchSingleGroupFromRemote(groupId)
+                ?: throw IllegalArgumentException("Group not found.")
+
+            val ownerId = remoteGroup.ownerId?.takeIf { it.isNotBlank() }
+                ?: throw IllegalStateException("This group has no owner configured.")
+
+            if (ownerId != currentUserId) {
+                throw IllegalStateException("Only the group owner can delete this group.")
+            }
+
+            remoteGroup.imageUrl
+                ?.takeIf { it.isNotBlank() }
+                ?.let { imageUrl ->
+                    runCatching { deleteGroupImage(imageUrl) }
+                        .onFailure { error ->
+                            android.util.Log.w(
+                                "GroupRepo",
+                                "Could not delete group image from Supabase: ${error.message}"
+                            )
+                        }
+                }
+
+            val groupRef = firestore.collection("groups").document(groupId)
+
+            val expensesSnapshot = groupRef.collection("expenses").get().awaitTaskResult()
+            expensesSnapshot.documents.forEach { expenseDoc ->
+                val expenseRef = expenseDoc.reference
+
+                val payersSnapshot = expenseRef.collection("payers").get().awaitTaskResult()
+                payersSnapshot.documents.forEach { payerDoc ->
+                    payerDoc.reference.delete().awaitTaskResult()
+                }
+
+                val splitsSnapshot = expenseRef.collection("splits").get().awaitTaskResult()
+                splitsSnapshot.documents.forEach { splitDoc ->
+                    splitDoc.reference.delete().awaitTaskResult()
+                }
+
+                expenseRef.delete().awaitTaskResult()
+            }
+
+            val membersSnapshot = groupRef.collection("members").get().awaitTaskResult()
+            membersSnapshot.documents.forEach { memberDoc ->
+                memberDoc.reference.delete().awaitTaskResult()
+            }
+
+            if (remoteGroup.joinCode.isNotBlank()) {
+                firestore.collection("group_join_codes")
+                    .document(remoteGroup.joinCode)
+                    .delete()
+                    .awaitTaskResult()
+            }
+
+            groupRef.delete().awaitTaskResult()
+
+            pendingSyncStore.removePendingGroupSync(groupId)
+            cache.deleteGroupById(groupId)
         }
     }
 
@@ -286,6 +356,43 @@ class GroupRepositoryImpl(
         }
     }
 
+    private suspend fun deleteGroupImage(imageUrl: String): Unit = withContext(Dispatchers.IO) {
+        val baseUrl = BuildConfig.SUPABASE_UPLOAD_URL.trim().trimEnd('/')
+        if (baseUrl.isBlank()) {
+            throw IllegalStateException("SUPABASE_UPLOAD_URL is not configured")
+        }
+
+        val payload = JSONObject().apply {
+            put("action", "delete")
+            put("imageUrl", imageUrl)
+        }
+
+        val endpointUrl = "$baseUrl/group-images/upload"
+        val connection = (URL(endpointUrl).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 15000
+            readTimeout = 45000
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Accept", "application/json")
+        }
+
+        try {
+            connection.outputStream.use { it.write(payload.toString().toByteArray()) }
+            val status = connection.responseCode
+            val body = runCatching {
+                val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+                stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            }.getOrDefault("")
+
+            if (status !in 200..299) {
+                throw IllegalStateException("Group image delete failed (HTTP $status): $body")
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private suspend fun createGroupWithReservedJoinCode(group: Group, creatorUserId: String): Boolean {
         return try {
             withTimeoutOrNull(3000L) {
@@ -295,6 +402,7 @@ class GroupRepositoryImpl(
                 val groupPayload = mutableMapOf<String, Any?>(
                     "name" to group.name,
                     "currency" to group.currency,
+                    "ownerId" to creatorUserId,
                     "joinCode" to group.joinCode,
                     "updatedAt" to now
                 ).apply {
@@ -657,6 +765,7 @@ class GroupRepositoryImpl(
                 name = groupSnapshot.getString("name") ?: "Untitled group",
                 imageUrl = groupSnapshot.getString("imageUrl"),
                 currency = groupSnapshot.getString("currency") ?: "Euro",
+                ownerId = groupSnapshot.getString("ownerId"),
                 members = members,
                 joinCode = groupSnapshot.getString("joinCode") ?: "",
                 balances = emptyMap()
@@ -691,6 +800,7 @@ class GroupRepositoryImpl(
             name = groupSnapshot.getString("name") ?: "Untitled group",
             imageUrl = groupSnapshot.getString("imageUrl"),
             currency = groupSnapshot.getString("currency") ?: "Euro",
+            ownerId = groupSnapshot.getString("ownerId"),
             members = members,
             joinCode = groupSnapshot.getString("joinCode") ?: "",
             balances = emptyMap()
@@ -769,6 +879,7 @@ class GroupRepositoryImpl(
         val groupPayload = mutableMapOf<String, Any?>(
             "name" to group.name,
             "currency" to group.currency,
+            "ownerId" to group.ownerId,
             "joinCode" to group.joinCode,
             "updatedAt" to now
         ).apply {

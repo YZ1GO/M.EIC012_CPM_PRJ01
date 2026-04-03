@@ -31,6 +31,7 @@ class Cache(context: Context) {
                 id = group.id,
                 name = group.name,
                 currency = group.currency,
+                ownerId = group.ownerId,
                 joinCode = group.joinCode,
                 imageUrl = group.imageUrl
             )
@@ -50,6 +51,7 @@ class Cache(context: Context) {
                 name = entity.name,
                 imageUrl = entity.imageUrl,
                 currency = entity.currency,
+                ownerId = entity.ownerId,
                 members = members,
                 joinCode = entity.joinCode,
                 // Balances are derived from calculated debts in the group details flow.
@@ -67,6 +69,7 @@ class Cache(context: Context) {
             name = groupEntity.name,
             imageUrl = groupEntity.imageUrl,
             currency = groupEntity.currency,
+            ownerId = groupEntity.ownerId,
             members = members,
             joinCode = groupEntity.joinCode,
             balances = emptyMap()
@@ -82,6 +85,7 @@ class Cache(context: Context) {
             name = groupEntity.name,
             imageUrl = groupEntity.imageUrl,
             currency = groupEntity.currency,
+            ownerId = groupEntity.ownerId,
             members = members,
             joinCode = groupEntity.joinCode,
             balances = emptyMap()
@@ -93,6 +97,7 @@ class Cache(context: Context) {
             id = group.id,
             name = group.name,
             currency = group.currency,
+            ownerId = group.ownerId,
             joinCode = group.joinCode,
             imageUrl = group.imageUrl
         )
@@ -111,6 +116,7 @@ class Cache(context: Context) {
                     id = group.id,
                     name = group.name,
                     currency = group.currency,
+                    ownerId = group.ownerId,
                     joinCode = group.joinCode,
                     imageUrl = group.imageUrl
                 )

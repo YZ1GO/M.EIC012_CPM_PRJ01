@@ -26,10 +26,26 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json();
+    const action = String(body.action ?? "upload").trim().toLowerCase();
     const imageBase64 = String(body.imageBase64 ?? "").trim();
+    const imageUrl = String(body.imageUrl ?? "").trim();
 
-    if (!imageBase64) {
+    if (action !== "upload" && action !== "delete") {
+      return new Response(JSON.stringify({ error: "Invalid action. Supported values: upload, delete" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (action === "upload" && !imageBase64) {
       return new Response(JSON.stringify({ error: "Missing field: imageBase64" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (action === "delete" && !imageUrl) {
+      return new Response(JSON.stringify({ error: "Missing field: imageUrl" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -48,6 +64,33 @@ Deno.serve(async (req: Request) => {
     const supabase = createClient(supabaseUrl, serviceRoleKey);
 
     const bucket = "cleave_group_images";
+
+    if (action === "delete") {
+      const objectPath = extractObjectPathFromImageUrl(imageUrl, bucket);
+      if (!objectPath) {
+        return new Response(JSON.stringify({ error: "Could not resolve object path from imageUrl" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { error: deleteError } = await supabase.storage
+        .from(bucket)
+        .remove([objectPath]);
+
+      if (deleteError) {
+        return new Response(JSON.stringify({ error: deleteError.message }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify({ deleted: true }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const objectPath = `groups/${crypto.randomUUID()}.jpg`;
 
     const bytes = Uint8Array.from(atob(imageBase64), (c) => c.charCodeAt(0));
@@ -89,3 +132,25 @@ Deno.serve(async (req: Request) => {
     });
   }
 });
+
+function extractObjectPathFromImageUrl(imageUrl: string, bucket: string): string | null {
+  try {
+    const parsed = new URL(imageUrl);
+    const pathname = parsed.pathname;
+    const signPrefix = `/storage/v1/object/sign/${bucket}/`;
+    const publicPrefix = `/storage/v1/object/public/${bucket}/`;
+
+    let rawPath: string | null = null;
+    if (pathname.includes(signPrefix)) {
+      rawPath = pathname.split(signPrefix)[1] ?? null;
+    } else if (pathname.includes(publicPrefix)) {
+      rawPath = pathname.split(publicPrefix)[1] ?? null;
+    }
+
+    const normalized = decodeURIComponent((rawPath ?? "").trim()).replace(/^\/+/, "");
+    if (!normalized) return null;
+    return normalized;
+  } catch {
+    return null;
+  }
+}

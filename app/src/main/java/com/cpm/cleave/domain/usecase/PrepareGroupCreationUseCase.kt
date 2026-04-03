@@ -36,6 +36,7 @@ class PrepareGroupCreationUseCase {
                 name = command.name,
                 imageUrl = command.imageUrl,
                 currency = command.currency,
+                ownerId = currentUser?.id,
                 members = currentUser?.let { listOf(it.id) } ?: emptyList(),
                 joinCode = joinCode,
                 balances = emptyMap()

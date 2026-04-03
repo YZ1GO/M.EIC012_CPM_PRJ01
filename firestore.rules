@@ -17,9 +17,14 @@ service cloud.firestore {
                 exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid));
         }
 
+        function isGroupOwner(groupId) {
+            return signedIn() &&
+                get(/databases/$(database)/documents/groups/$(groupId)).data.ownerId == request.auth.uid;
+        }
+
         // validate top-level group document structure and lengths
         function validGroupPayload() {
-            return request.resource.data.keys().hasOnly(['name', 'currency', 'joinCode', 'imageUrl', 'updatedAt']) &&
+            return request.resource.data.keys().hasOnly(['name', 'currency', 'ownerId', 'joinCode', 'imageUrl', 'updatedAt']) &&
                 request.resource.data.name is string &&
                 request.resource.data.currency is string &&
                 request.resource.data.joinCode is string &&
@@ -30,6 +35,8 @@ service cloud.firestore {
                 request.resource.data.currency.size() <= 20 &&
                 request.resource.data.joinCode.size() >= 6 &&
                 request.resource.data.joinCode.size() <= 12 &&
+                (!('ownerId' in request.resource.data) ||
+                    (request.resource.data.ownerId is string && request.resource.data.ownerId.size() > 0 && request.resource.data.ownerId.size() <= 128)) &&
                 (!('imageUrl' in request.resource.data) ||
                     request.resource.data.imageUrl == null ||
                     (request.resource.data.imageUrl is string && request.resource.data.imageUrl.size() <= 2000));
@@ -101,15 +108,21 @@ service cloud.firestore {
                 request.resource.data.joinCode is string &&
                 request.resource.data.updatedAt is int &&
                 request.resource.data.joinCode == joinCode;
-            allow delete: if false;
+            allow delete: if signedIn() &&
+                resource.data.groupId is string &&
+                isGroupOwner(resource.data.groupId);
         }
 
         match /groups/{groupId} {
             // group access restricted to members
             allow read: if signedIn() && isGroupMember(groupId);
-            allow create: if signedIn() && validGroupPayload();
+            allow create: if signedIn() && validGroupPayload() &&
+                request.resource.data.ownerId is string &&
+                request.resource.data.ownerId == request.auth.uid;
             allow update: if signedIn() && isGroupMember(groupId) && validGroupPayload();
-            allow delete: if false;
+            allow delete: if signedIn() &&
+                resource.data.ownerId is string &&
+                resource.data.ownerId == request.auth.uid;
 
             match /members/{userId} {
                 // creator can bootstrap their own member doc; later changes require membership

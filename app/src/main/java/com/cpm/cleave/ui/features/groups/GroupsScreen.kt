@@ -200,7 +200,8 @@ fun GroupListItem(group: Group, onClick: () -> Unit) {
 @Composable
 fun GroupDetailsScreen(
     viewModel: GroupDetailsViewModel,
-    onAddExpenseClick: (String) -> Unit
+    onAddExpenseClick: (String) -> Unit,
+    onGroupDeleted: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -409,6 +410,21 @@ fun GroupDetailsScreen(
                 .height(48.dp)
         ) {
             Text("Add Expense")
+        }
+
+        if (uiState.canDeleteGroup) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(
+                onClick = { viewModel.onDeleteGroupClicked(onGroupDeleted) },
+                enabled = !uiState.isDeleting,
+                colors = ButtonDefaults.buttonColors(containerColor = colorScheme.error),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+            ) {
+                Text(if (uiState.isDeleting) "Deleting..." else "Delete Group")
+            }
         }
 
         Spacer(modifier = Modifier.height(sectionSpacing))

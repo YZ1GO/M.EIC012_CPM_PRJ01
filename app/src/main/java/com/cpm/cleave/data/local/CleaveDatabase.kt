@@ -35,7 +35,7 @@ import com.cpm.cleave.data.local.entities.UserEntity
         DebtEntity::class,
         PaymentEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class CleaveDatabase : RoomDatabase() {
@@ -65,7 +65,7 @@ abstract class CleaveDatabase : RoomDatabase() {
                     builder.fallbackToDestructiveMigration(dropAllTables = true)
                 }
 
-                builder.addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                builder.addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
 
                 val instance = builder.build()
                 INSTANCE = instance
@@ -127,6 +127,28 @@ abstract class CleaveDatabase : RoomDatabase() {
 
                 if (!hasPhotoUrlColumn) {
                     db.execSQL("ALTER TABLE users ADD COLUMN photoUrl TEXT")
+                }
+            }
+        }
+
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                val hasOwnerIdColumn = db.query("PRAGMA table_info(groups)").use { cursor ->
+                    val nameIndex = cursor.getColumnIndex("name")
+                    var found = false
+
+                    while (nameIndex >= 0 && cursor.moveToNext()) {
+                        if (cursor.getString(nameIndex) == "ownerId") {
+                            found = true
+                            break
+                        }
+                    }
+
+                    found
+                }
+
+                if (!hasOwnerIdColumn) {
+                    db.execSQL("ALTER TABLE groups ADD COLUMN ownerId TEXT")
                 }
             }
         }
