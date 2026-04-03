@@ -1,13 +1,11 @@
 package com.cpm.cleave.ui.features.addexpense
 
 import android.Manifest
-import android.content.Intent
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
-import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -59,6 +57,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import androidx.core.content.FileProvider
+import com.cpm.cleave.ui.features.common.CameraPermissionPrompt
 
 @Composable
 fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit) {
@@ -110,61 +109,11 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
     }
 
     cameraPermissionDeniedMessage?.let { message ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(colorScheme.surfaceVariant.copy(alpha = 0.28f), RoundedCornerShape(20.dp))
-                    .border(1.dp, colorScheme.outlineVariant.copy(alpha = 0.7f), RoundedCornerShape(20.dp))
-                    .padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "Camera permission needed",
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = message,
-                    color = colorScheme.onSurfaceVariant,
-                    fontSize = 14.sp
-                )
-                Spacer(modifier = Modifier.height(20.dp))
-                Button(
-                    onClick = {
-                        val settingsIntent = Intent(
-                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                            Uri.fromParts("package", context.packageName, null)
-                        )
-                        context.startActivity(settingsIntent)
-                    },
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primary),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Open app settings")
-                }
-                Spacer(modifier = Modifier.height(10.dp))
-                Button(
-                    onClick = {
-                        cameraPermissionDeniedMessage = null
-                    },
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = colorScheme.tertiaryContainer),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Back to expense")
-                }
-            }
-        }
-        return
+        CameraPermissionPrompt(
+            message = message,
+            onDismiss = { cameraPermissionDeniedMessage = null },
+            dismissLabel = "Back to expense"
+        )
     }
 
     val labelForMember: (String) -> String = { memberId ->

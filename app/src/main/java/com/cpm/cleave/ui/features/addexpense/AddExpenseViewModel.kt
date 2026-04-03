@@ -344,6 +344,8 @@ class AddExpenseViewModel(
 
     fun createExpense(onSuccess: () -> Unit) {
         val state = _uiState.value
+        if (state.isLoading) return
+
         val amount = state.amountInput.toDoubleOrNull()
 
         if (amount == null || amount <= 0.0) {

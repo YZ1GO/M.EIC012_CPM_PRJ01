@@ -21,8 +21,10 @@ class JoinGroupViewModel(
 
     fun onJoinCodeChanged(newCode: String) {
         val normalized = newCode
-            .filterNot { it.isWhitespace() }
+            .filter { it.isLetterOrDigit() }
             .uppercase(Locale.ROOT)
+            .take(8)
+            
         _uiState.update { it.copy(joinCode = normalized, errorMessage = null) }
     }
 
@@ -44,15 +46,6 @@ class JoinGroupViewModel(
 
     fun closeScanner() {
         _uiState.update { it.copy(isScannerVisible = false) }
-    }
-
-    fun onScanPermissionDenied() {
-        _uiState.update {
-            it.copy(
-                isScannerVisible = false,
-                errorMessage = "Camera permission is required to scan a QR code"
-            )
-        }
     }
 
     fun onQrCodeScanned(rawValue: String, onSuccess: () -> Unit) {
@@ -80,6 +73,8 @@ class JoinGroupViewModel(
 
     fun joinGroup(onSuccess: () -> Unit) {
         val state = _uiState.value
+        if (state.isLoading) return
+
         if (state.joinCode.isBlank()) {
             _uiState.update { it.copy(errorMessage = "Please enter a join code") }
             return

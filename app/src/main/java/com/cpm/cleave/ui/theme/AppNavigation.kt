@@ -11,17 +11,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -31,21 +21,8 @@ import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,6 +31,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -70,14 +48,7 @@ import com.cpm.cleave.domain.repository.contracts.IAuthRepository
 import com.cpm.cleave.domain.repository.contracts.IExpenseRepository
 import com.cpm.cleave.domain.repository.contracts.IGroupRepository
 import com.cpm.cleave.domain.repository.contracts.IScannerRepository
-import com.cpm.cleave.domain.usecase.GetAddExpenseMembersUseCase
-import com.cpm.cleave.domain.usecase.GetGroupDetailsUseCase
-import com.cpm.cleave.domain.usecase.GetGroupsUseCase
-import com.cpm.cleave.domain.usecase.RequestCreateExpenseUseCase
-import com.cpm.cleave.domain.usecase.RequestCreateGroupUseCase
-import com.cpm.cleave.domain.usecase.RequestDeleteGroupUseCase
-import com.cpm.cleave.domain.usecase.RequestExpelGroupMemberUseCase
-import com.cpm.cleave.domain.usecase.RequestJoinGroupUseCase
+import com.cpm.cleave.domain.usecase.*
 import com.cpm.cleave.ui.features.addexpense.AddExpenseScreen
 import com.cpm.cleave.ui.features.addexpense.AddExpenseViewModel
 import com.cpm.cleave.ui.features.auth.AuthScreen
@@ -94,14 +65,12 @@ import com.cpm.cleave.ui.features.profile.ProfileScreen
 import com.cpm.cleave.ui.features.profile.ProfileViewModel
 
 sealed class NavScreen(val route: String, val title: String, val icon: ImageVector? = null) {
-    object Groups: NavScreen("groups", "Groups", Icons.Default.Groups)
-    object Profile: NavScreen("profile", "Profile", Icons.Default.Person)
+    object Groups : NavScreen("groups", "Groups", Icons.Default.Groups)
+    object Profile : NavScreen("profile", "Profile", Icons.Default.Person)
     object CreateGroup : NavScreen("create_group", "Create Group")
     object JoinGroup : NavScreen("join_group?joinCode={joinCode}", "Join Group") {
-        fun createRoute(joinCode: String? = null): String {
-            if (joinCode.isNullOrBlank()) return "join_group"
-            return "join_group?joinCode=${Uri.encode(joinCode)}"
-        }
+        fun createRoute(joinCode: String? = null): String =
+            if (joinCode.isNullOrBlank()) "join_group" else "join_group?joinCode=${Uri.encode(joinCode)}"
     }
     object AddExpense : NavScreen("add_expense/{groupId}", "Add Expense") {
         fun createRoute(groupId: String): String = "add_expense/$groupId"
@@ -132,26 +101,18 @@ fun MainScreen(
 
     LaunchedEffect(Unit) {
         authRepository.getCurrentUser()
-            .onSuccess { user ->
-                if (user != null) {
-                    isAuthenticated = true
-                } else {
-                    if (shouldAutoCreateGuest) {
-                        authRepository.getOrCreateAnonymousUser()
-                            .onSuccess { isAuthenticated = true }
-                            .onFailure { isAuthenticated = false }
-                    } else {
-                        isAuthenticated = false
-                    }
-                }
-            }
+            .onSuccess { user -> isAuthenticated = user != null }
             .onFailure { isAuthenticated = false }
+        
+        if (!isAuthenticated && shouldAutoCreateGuest) {
+            authRepository.getOrCreateAnonymousUser().onSuccess { isAuthenticated = true }
+        }
         isAuthCheckInProgress = false
     }
 
     if (isAuthCheckInProgress) {
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(24.dp)) {
-            Text("Loading...")
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+            CircularProgressIndicator(strokeWidth = 2.dp)
         }
         return
     }
@@ -159,11 +120,8 @@ fun MainScreen(
     if (!isAuthenticated) {
         val authViewModel: AuthViewModel = viewModel(
             key = "auth_flow_$authFlowSessionKey",
-            factory = viewModelFactory {
-                initializer { AuthViewModel(authRepository) }
-            }
+            factory = viewModelFactory { initializer { AuthViewModel(authRepository) } }
         )
-
         AuthScreen(
             viewModel = authViewModel,
             defaultRegisterMode = openAuthInRegisterMode,
@@ -180,10 +138,12 @@ fun MainScreen(
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
-
     val showBottomBar = navItems.any { it.route == currentRoute }
 
     Scaffold(
+        contentWindowInsets = WindowInsets.safeDrawing.only(
+            WindowInsetsSides.Top + WindowInsetsSides.Horizontal
+        ),
         bottomBar = {
             if (showBottomBar) {
                 BottomNavigationBar(
@@ -195,269 +155,105 @@ fun MainScreen(
         }
     ) { innerPadding ->
         LaunchedEffect(isAuthenticated, pendingDeepLinkJoinCode) {
-            val joinCode = pendingDeepLinkJoinCode
-                ?.trim()
-                ?.takeIf { it.isNotBlank() }
-                ?: return@LaunchedEffect
-
+            val joinCode = pendingDeepLinkJoinCode?.trim()?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
             if (!isAuthenticated || joinCode == lastConsumedDeepLinkJoinCode) return@LaunchedEffect
-
             lastConsumedDeepLinkJoinCode = joinCode
-            navController.navigate(NavScreen.JoinGroup.createRoute(joinCode)) {
-                launchSingleTop = true
-            }
+            navController.navigate(NavScreen.JoinGroup.createRoute(joinCode)) { launchSingleTop = true }
         }
 
         NavHost(
             navController = navController,
             startDestination = NavScreen.Groups.route,
-            modifier = Modifier.padding(innerPadding),
-            enterTransition = { fadeIn(animationSpec = tween(150)) },
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+            enterTransition = { fadeIn(tween(150)) },
             exitTransition = {
-                // Parallax effect: Push the old screen left when opening a child screen
                 if (targetState.destination.route !in listOf(NavScreen.Groups.route, NavScreen.Profile.route)) {
-                    slideOutHorizontally(
-                        targetOffsetX = { fullWidth -> -fullWidth / 3 },
-                        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
-                    ) + fadeOut(animationSpec = tween(400))
-                } else {
-                    fadeOut(animationSpec = tween(150))
-                }
+                    slideOutHorizontally(targetOffsetX = { -it / 3 }, animationSpec = tween(400, easing = FastOutSlowInEasing)) + fadeOut(tween(400))
+                } else fadeOut(tween(150))
             },
             popEnterTransition = {
-                // Parallax effect: Pull the old screen back in from the left
                 if (initialState.destination.route !in listOf(NavScreen.Groups.route, NavScreen.Profile.route)) {
-                    slideInHorizontally(
-                        initialOffsetX = { fullWidth -> -fullWidth / 3 },
-                        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
-                    ) + fadeIn(animationSpec = tween(400))
-                } else {
-                    fadeIn(animationSpec = tween(150))
-                }
+                    slideInHorizontally(initialOffsetX = { -it / 3 }, animationSpec = tween(400, easing = FastOutSlowInEasing)) + fadeIn(tween(400))
+                } else fadeIn(tween(150))
             },
-            popExitTransition = { fadeOut(animationSpec = tween(150)) }
+            popExitTransition = { fadeOut(tween(150)) }
         ) {
             composable(NavScreen.Groups.route) {
                 val groupsViewModel: GroupsViewModel = viewModel(
                     key = "groups_flow_$groupsSessionKey",
-                    factory = viewModelFactory {
-                        initializer { GroupsViewModel(GetGroupsUseCase(groupRepository)) }
-                    }
+                    factory = viewModelFactory { initializer { GroupsViewModel(GetGroupsUseCase(groupRepository)) } }
                 )
-
-                GroupsScreen(
-                    groupsViewModel = groupsViewModel,
-                    onGroupClick = { groupId ->
-                        navController.navigate(NavScreen.GroupDetails.createRoute(groupId))
-                    }
-                )
+                GroupsScreen(groupsViewModel = groupsViewModel, onGroupClick = { navController.navigate(NavScreen.GroupDetails.createRoute(it)) })
             }
+            
             composable(NavScreen.Profile.route) {
-                val profileViewModel: ProfileViewModel = viewModel(
-                    factory = viewModelFactory {
-                        initializer { ProfileViewModel(authRepository) }
-                    }
-                )
-
+                val profileViewModel: ProfileViewModel = viewModel(factory = viewModelFactory { initializer { ProfileViewModel(authRepository) } })
                 ProfileScreen(
                     viewModel = profileViewModel,
-                    onSignedOut = {
-                        shouldAutoCreateGuest = false
-                        openAuthInRegisterMode = false
-                        authFlowSessionKey += 1
-                        isAuthenticated = false
-                    },
-                    onRegisterRequested = {
-                        shouldAutoCreateGuest = false
-                        openAuthInRegisterMode = true
-                        authFlowSessionKey += 1
-                        isAuthenticated = false
-                    }
+                    onSignedOut = { authFlowSessionKey++; isAuthenticated = false },
+                    onRegisterRequested = { openAuthInRegisterMode = true; authFlowSessionKey++; isAuthenticated = false }
                 )
             }
 
-            composable(
-                route = NavScreen.CreateGroup.route,
-                enterTransition = {
-                    slideInHorizontally(
-                        initialOffsetX = { fullWidth -> fullWidth }, // Start completely off-screen to the right
-                        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
-                    ) + fadeIn(animationSpec = tween(400))
-                },
-                popExitTransition = {
-                    slideOutHorizontally(
-                        targetOffsetX = { fullWidth -> fullWidth }, // Slide back out to the right
-                        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
-                    ) + fadeOut(animationSpec = tween(400))
-                }
-            ) {
-                val createGroupViewModel: CreateGroupViewModel = viewModel(
-                    factory = viewModelFactory {
-                        initializer { CreateGroupViewModel(RequestCreateGroupUseCase(groupRepository)) }
-                    }
-                )
-
-                Column(modifier = Modifier.fillMaxSize()) {
-                    MinimalistTopBar(onBackClick = { navController.popBackStack() })
-                    CreateGroupScreen(createGroupViewModel, onNavigateBack = {
-                        groupsSessionKey += 1
-                        navController.navigate(NavScreen.Groups.route) {
-                            popUpTo(navController.graph.startDestinationId) {
-                                saveState = false
-                            }
-                            launchSingleTop = true
-                            restoreState = false
-                        }
-                    })
+            composable(NavScreen.CreateGroup.route) {
+                val vm: CreateGroupViewModel = viewModel(factory = viewModelFactory { initializer { CreateGroupViewModel(RequestCreateGroupUseCase(groupRepository)) } })
+                Column(Modifier.fillMaxSize()) {
+                    MinimalistTopBar { navController.popBackStack() }
+                    CreateGroupScreen(vm) { groupsSessionKey++; navController.navigate(NavScreen.Groups.route) { popUpTo(navController.graph.startDestinationId); launchSingleTop = true } }
                 }
             }
 
             composable(
-                route = NavScreen.JoinGroup.route,
-                arguments = listOf(
-                    navArgument("joinCode") {
-                        type = NavType.StringType
-                        nullable = true
-                        defaultValue = null
-                    }
-                ),
-                enterTransition = {
-                    slideInHorizontally(
-                        initialOffsetX = { fullWidth -> fullWidth },
-                        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
-                    ) + fadeIn(animationSpec = tween(400))
-                },
-                popExitTransition = {
-                    slideOutHorizontally(
-                        targetOffsetX = { fullWidth -> fullWidth },
-                        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
-                    ) + fadeOut(animationSpec = tween(400))
-                }
+                route = NavScreen.JoinGroup.route, 
+                arguments = listOf(navArgument("joinCode") { type = NavType.StringType; nullable = true })
             ) { backStackEntry ->
-                val deepLinkJoinCode = backStackEntry.arguments?.getString("joinCode")
-                val joinGroupViewModel: JoinGroupViewModel = viewModel(
-                    factory = viewModelFactory {
-                        initializer {
-                            JoinGroupViewModel(
-                                requestJoinGroupUseCase = RequestJoinGroupUseCase(groupRepository),
-                                scannerRepository = scannerRepository
-                            )
-                        }
-                    }
-                )
-
-                LaunchedEffect(deepLinkJoinCode) {
-                    joinGroupViewModel.applyDeepLinkJoinCode(deepLinkJoinCode)
-                }
-
-                Column(modifier = Modifier.fillMaxSize()) {
-                    MinimalistTopBar(onBackClick = { navController.popBackStack() })
-                    JoinGroupScreen(joinGroupViewModel, onNavigateBack = {
-                        groupsSessionKey += 1
-                        navController.navigate(NavScreen.Groups.route) {
-                            popUpTo(navController.graph.startDestinationId) {
-                                saveState = false
-                            }
-                            launchSingleTop = true
-                            restoreState = false
-                        }
-                    })
+                val vm: JoinGroupViewModel = viewModel(factory = viewModelFactory { initializer { JoinGroupViewModel(RequestJoinGroupUseCase(groupRepository), scannerRepository) } })
+                LaunchedEffect(Unit) { vm.applyDeepLinkJoinCode(backStackEntry.arguments?.getString("joinCode")) }
+                Column(Modifier.fillMaxSize()) {
+                    MinimalistTopBar { navController.popBackStack() }
+                    JoinGroupScreen(vm) { groupsSessionKey++; navController.navigate(NavScreen.Groups.route) { popUpTo(navController.graph.startDestinationId); launchSingleTop = true } }
                 }
             }
 
             composable(
-                route = NavScreen.GroupDetails.route,
-                arguments = listOf(navArgument("groupId") { type = NavType.StringType }),
-                enterTransition = {
-                    slideInHorizontally(
-                        initialOffsetX = { fullWidth -> fullWidth },
-                        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
-                    ) + fadeIn(animationSpec = tween(400))
-                },
-                popExitTransition = {
-                    slideOutHorizontally(
-                        targetOffsetX = { fullWidth -> fullWidth },
-                        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
-                    ) + fadeOut(animationSpec = tween(400))
-                }
+                route = NavScreen.GroupDetails.route, 
+                arguments = listOf(navArgument("groupId") { type = NavType.StringType })
             ) { backStackEntry ->
-                val groupId = backStackEntry.arguments?.getString("groupId") ?: return@composable
-                val groupDetailsViewModel: GroupDetailsViewModel = viewModel(
-                    key = "group_details_$groupId",
-                    factory = viewModelFactory {
-                        initializer {
+                val id = backStackEntry.arguments?.getString("groupId") ?: return@composable
+                val vm: GroupDetailsViewModel = viewModel(
+                    key = "details_$id", 
+                    factory = viewModelFactory { 
+                        initializer { 
                             GroupDetailsViewModel(
-                                groupId = groupId,
-                                getGroupDetailsUseCase = GetGroupDetailsUseCase(
-                                    groupRepository = groupRepository,
-                                    expenseRepository = expenseRepository,
-                                    authRepository = authRepository
-                                ),
+                                groupId = id, 
+                                getGroupDetailsUseCase = GetGroupDetailsUseCase(groupRepository, expenseRepository, authRepository), 
                                 requestDeleteGroupUseCase = RequestDeleteGroupUseCase(groupRepository),
                                 requestExpelGroupMemberUseCase = RequestExpelGroupMemberUseCase(groupRepository)
-                            )
-                        }
+                            ) 
+                        } 
                     }
                 )
-
-                Column(modifier = Modifier.fillMaxSize()) {
-                    MinimalistTopBar(onBackClick = { navController.popBackStack() })
+                Column(Modifier.fillMaxSize()) {
+                    MinimalistTopBar { navController.popBackStack() }
                     GroupDetailsScreen(
-                        viewModel = groupDetailsViewModel,
-                        onAddExpenseClick = { selectedGroupId ->
-                            navController.navigate(NavScreen.AddExpense.createRoute(selectedGroupId))
-                        },
-                        onGroupDeleted = {
-                            groupsSessionKey += 1
-                            navController.navigate(NavScreen.Groups.route) {
-                                popUpTo(navController.graph.startDestinationId) {
-                                    saveState = false
-                                }
-                                launchSingleTop = true
-                                restoreState = false
-                            }
-                        }
+                        viewModel = vm, 
+                        onAddExpenseClick = { navController.navigate(NavScreen.AddExpense.createRoute(it)) }, 
+                        onGroupDeleted = { groupsSessionKey++; navController.navigate(NavScreen.Groups.route) { popUpTo(navController.graph.startDestinationId); launchSingleTop = true } }
                     )
                 }
             }
 
             composable(
-                route = NavScreen.AddExpense.route,
-                arguments = listOf(navArgument("groupId") { type = NavType.StringType }),
-                enterTransition = {
-                    slideInHorizontally(
-                        initialOffsetX = { fullWidth -> fullWidth },
-                        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
-                    ) + fadeIn(animationSpec = tween(400))
-                },
-                popExitTransition = {
-                    slideOutHorizontally(
-                        targetOffsetX = { fullWidth -> fullWidth },
-                        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
-                    ) + fadeOut(animationSpec = tween(400))
-                }
+                route = NavScreen.AddExpense.route, 
+                arguments = listOf(navArgument("groupId") { type = NavType.StringType })
             ) { backStackEntry ->
-                val groupId = backStackEntry.arguments?.getString("groupId") ?: return@composable
-                val addExpenseViewModel: AddExpenseViewModel = viewModel(
-                    factory = viewModelFactory {
-                        initializer {
-                            AddExpenseViewModel(
-                                authRepository = authRepository,
-                                scannerRepository = scannerRepository,
-                                getAddExpenseMembersUseCase = GetAddExpenseMembersUseCase(groupRepository),
-                                requestCreateExpenseUseCase = RequestCreateExpenseUseCase(expenseRepository),
-                                groupId = groupId
-                            )
-                        }
-                    }
-                )
-
-                Column(modifier = Modifier.fillMaxSize()) {
-                    MinimalistTopBar(onBackClick = { navController.popBackStack() })
-                    AddExpenseScreen(
-                        viewModel = addExpenseViewModel,
-                        onNavigateBack = { navController.popBackStack() }
-                    )
+                val id = backStackEntry.arguments?.getString("groupId") ?: return@composable
+                val vm: AddExpenseViewModel = viewModel(factory = viewModelFactory { initializer { AddExpenseViewModel(authRepository, scannerRepository, GetAddExpenseMembersUseCase(groupRepository), RequestCreateExpenseUseCase(expenseRepository), id) } })
+                Column(Modifier.fillMaxSize()) {
+                    MinimalistTopBar { navController.popBackStack() }
+                    AddExpenseScreen(vm) { navController.popBackStack() }
                 }
             }
         }
@@ -473,215 +269,95 @@ fun BottomNavigationBar(
     var showActionMenu by remember { mutableStateOf(false) }
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+    val screenHeightDp = LocalConfiguration.current.screenHeightDp
+    val barHeight = if (screenHeightDp <= 700) 64.dp else 72.dp
 
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(72.dp),
+        modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surface,
-        shadowElevation = 8.dp
+        shadowElevation = 16.dp
     ) {
-        Row(
-            modifier = Modifier.fillMaxSize(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-                contentAlignment = Alignment.Center
+                    .fillMaxWidth()
+                    .height(barHeight),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                MinimalistNavItem(
-                    selected = currentRoute == NavScreen.Groups.route,
-                    onClick = {
-                        navController.navigate(NavScreen.Groups.route) {
-                            popUpTo(navController.graph.startDestinationId) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
-                    icon = NavScreen.Groups.icon ?: Icons.Default.Groups
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-                contentAlignment = Alignment.Center
-            ) {
-                val strokeColor = MaterialTheme.colorScheme.primary
-                val density = LocalDensity.current
-                val strokeWidth = with(density) { 2.dp.toPx() }
-                
-                Box(
-                    modifier = Modifier
-                        .size(52.dp)
-                        .drawBehind {
-                            drawRoundRect(
-                                color = strokeColor,
-                                style = Stroke(
-                                    width = strokeWidth,
-                                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(15f, 15f), 0f)
-                                ),
-                                cornerRadius = CornerRadius(14.dp.toPx(), 14.dp.toPx())
-                            )
-                        }
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = { showActionMenu = !showActionMenu }
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Actions",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(32.dp)
-                    )
+                NavItemBox(Modifier.weight(1f), currentRoute == NavScreen.Groups.route, Icons.Default.Groups) {
+                    navController.navigate(NavScreen.Groups.route) { popUpTo(navController.graph.startDestinationId) { saveState = true }; launchSingleTop = true; restoreState = true }
                 }
 
-                DropdownMenu(
-                    expanded = showActionMenu,
-                    onDismissRequest = { showActionMenu = false },
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier
-                        .background(MaterialTheme.colorScheme.surface)
-                        .padding(4.dp)
-                ) {
-                    DropdownMenuItem(
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Default.GroupAdd,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        },
-                        text = { 
-                            Text(
-                                text = "Create group",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.onSurface
-                            ) 
-                        },
-                        onClick = {
-                            showActionMenu = false
-                            onCreateGroupClick()
-                        },
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    val color = MaterialTheme.colorScheme.primary
+                    Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .padding(horizontal = 4.dp)
-                    )
-                    
-                    Spacer(modifier = Modifier.height(4.dp))
-                    
-                    DropdownMenuItem(
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Default.Link,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        },
-                        text = { 
-                            Text(
-                                text = "Join group",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.onSurface
-                            ) 
-                        },
-                        onClick = {
-                            showActionMenu = false
-                            onJoinGroupClick()
-                        },
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .padding(horizontal = 4.dp)
-                    )
+                            .size(52.dp)
+                            .drawBehind {
+                                drawRoundRect(
+                                    color = color,
+                                    style = Stroke(width = 2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(15f, 15f), 0f)),
+                                    cornerRadius = CornerRadius(14.dp.toPx(), 14.dp.toPx())
+                                )
+                            }
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable { showActionMenu = !showActionMenu },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Add, "Add", tint = color, modifier = Modifier.size(32.dp))
+                    }
+
+                    DropdownMenu(
+                        expanded = showActionMenu,
+                        onDismissRequest = { showActionMenu = false },
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.background(MaterialTheme.colorScheme.surface).padding(4.dp)
+                    ) {
+                        DropdownMenuItem(
+                            leadingIcon = { Icon(Icons.Default.GroupAdd, null, tint = color, modifier = Modifier.size(20.dp)) },
+                            text = { Text("Create group", style = MaterialTheme.typography.titleSmall) },
+                            onClick = { showActionMenu = false; onCreateGroupClick() },
+                            modifier = Modifier.clip(RoundedCornerShape(12.dp)).padding(horizontal = 4.dp)
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        DropdownMenuItem(
+                            leadingIcon = { Icon(Icons.Default.Link, null, tint = color, modifier = Modifier.size(20.dp)) },
+                            text = { Text("Join group", style = MaterialTheme.typography.titleSmall) },
+                            onClick = { showActionMenu = false; onJoinGroupClick() },
+                            modifier = Modifier.clip(RoundedCornerShape(12.dp)).padding(horizontal = 4.dp)
+                        )
+                    }
+                }
+
+                NavItemBox(Modifier.weight(1f), currentRoute == NavScreen.Profile.route, Icons.Default.Person) {
+                    navController.navigate(NavScreen.Profile.route) { popUpTo(navController.graph.startDestinationId) { saveState = true }; launchSingleTop = true; restoreState = true }
                 }
             }
 
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-                contentAlignment = Alignment.Center
-            ) {
-                MinimalistNavItem(
-                    selected = currentRoute == NavScreen.Profile.route,
-                    onClick = {
-                        navController.navigate(NavScreen.Profile.route) {
-                            popUpTo(navController.graph.startDestinationId) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
-                    icon = NavScreen.Profile.icon ?: Icons.Default.Person
-                )
-            }
+            Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars))
         }
     }
 }
 
 @Composable
-fun MinimalistNavItem(
-    selected: Boolean,
-    onClick: () -> Unit,
-    icon: ImageVector
-) {
-    val tint by animateColorAsState(
-        targetValue = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-        label = "iconTint"
-    )
-
+fun NavItemBox(modifier: Modifier, selected: Boolean, icon: ImageVector, onClick: () -> Unit) {
+    val tint by animateColorAsState(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f), label = "")
     Box(
-        modifier = Modifier
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
-            )
-            .padding(12.dp),
+        modifier = modifier
+            .fillMaxHeight()
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick), 
         contentAlignment = Alignment.Center
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = tint,
-            modifier = Modifier.size(32.dp)
-        )
+        Icon(icon, null, tint = tint, modifier = Modifier.size(32.dp))
     }
 }
 
 @Composable
 fun MinimalistTopBar(onBackClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .clip(CircleShape)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onBackClick
-                )
-                .padding(12.dp)
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Back",
-                tint = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.size(24.dp)
-            )
+    Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.clip(CircleShape).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onBackClick).padding(12.dp)) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(24.dp))
         }
     }
 }
