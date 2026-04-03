@@ -86,6 +86,7 @@ import kotlinx.coroutines.delay
 fun ProfileScreen(
     viewModel: ProfileViewModel,
     onSignedOut: () -> Unit = {},
+    onSignInRequested: () -> Unit = {},
     onRegisterRequested: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -127,11 +128,9 @@ fun ProfileScreen(
                     Toast.makeText(context, effect.message, Toast.LENGTH_SHORT).show()
                 }
                 ProfileUiEffect.NavigateToSignIn -> {
-                    Toast.makeText(context, "Sign in to your account", Toast.LENGTH_SHORT).show()
-                    onSignedOut()
+                    onSignInRequested()
                 }
                 ProfileUiEffect.NavigateToRegister -> {
-                    Toast.makeText(context, "Create your account", Toast.LENGTH_SHORT).show()
                     onRegisterRequested()
                 }
                 ProfileUiEffect.ProfilePhotoSaved -> {

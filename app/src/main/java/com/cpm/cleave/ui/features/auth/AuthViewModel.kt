@@ -10,10 +10,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class AuthViewModel(
-    private val authRepository: IAuthRepository
+    private val authRepository: IAuthRepository,
+    initialRegisterMode: Boolean = false
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(AuthUiState())
+    private val _uiState = MutableStateFlow(AuthUiState(isRegisterMode = initialRegisterMode))
     val uiState: StateFlow<AuthUiState> = _uiState.asStateFlow()
 
     // --- Validation Helpers ---

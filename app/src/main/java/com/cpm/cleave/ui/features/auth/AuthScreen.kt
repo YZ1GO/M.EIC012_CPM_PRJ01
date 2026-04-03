@@ -105,7 +105,9 @@ fun AuthScreen(
     }
 
     LaunchedEffect(defaultRegisterMode) {
-        viewModel.setRegisterMode(defaultRegisterMode)
+        if (uiState.isRegisterMode != defaultRegisterMode) {
+            viewModel.setRegisterMode(defaultRegisterMode)
+        }
     }
 
     LaunchedEffect(uiState.isAuthenticated) {
@@ -391,7 +393,6 @@ fun AuthScreen(
             Text("Continue with Google", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
         }
 
-        Spacer(modifier = Modifier.weight(1f))
         Spacer(modifier = Modifier.height(24.dp))
 
         // Bottom Toggles

@@ -70,6 +70,9 @@ import com.cpm.cleave.ui.features.profile.ProfileViewModel
 sealed class NavScreen(val route: String, val title: String, val icon: ImageVector? = null) {
     object Groups : NavScreen("groups", "Groups", Icons.Default.Groups)
     object Profile : NavScreen("profile", "Profile", Icons.Default.Person)
+    object Auth : NavScreen("auth?register={register}", "Auth") {
+        fun createRoute(register: Boolean): String = "auth?register=$register"
+    }
     object CreateGroup : NavScreen("create_group", "Create Group")
     object JoinGroup : NavScreen("join_group?joinCode={joinCode}", "Join Group") {
         fun createRoute(joinCode: String? = null): String =
@@ -123,7 +126,9 @@ fun MainScreen(
     if (!isAuthenticated) {
         val authViewModel: AuthViewModel = viewModel(
             key = "auth_flow_$authFlowSessionKey",
-            factory = viewModelFactory { initializer { AuthViewModel(authRepository) } }
+            factory = viewModelFactory {
+                initializer { AuthViewModel(authRepository, initialRegisterMode = openAuthInRegisterMode) }
+            }
         )
         AuthScreen(
             viewModel = authViewModel,
@@ -196,8 +201,61 @@ fun MainScreen(
                 ProfileScreen(
                     viewModel = profileViewModel,
                     onSignedOut = { authFlowSessionKey++; isAuthenticated = false },
-                    onRegisterRequested = { openAuthInRegisterMode = true; authFlowSessionKey++; isAuthenticated = false }
+                    onSignInRequested = { navController.navigate(NavScreen.Auth.createRoute(register = false)) },
+                    onRegisterRequested = { navController.navigate(NavScreen.Auth.createRoute(register = true)) }
                 )
+            }
+
+            composable(
+                route = NavScreen.Auth.route,
+                arguments = listOf(navArgument("register") {
+                    type = NavType.BoolType
+                    defaultValue = false
+                }),
+                enterTransition = {
+                    slideInHorizontally(
+                        initialOffsetX = { it },
+                        animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing)
+                    ) + fadeIn(tween(360))
+                },
+                exitTransition = {
+                    slideOutHorizontally(
+                        targetOffsetX = { it / 3 },
+                        animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing)
+                    ) + fadeOut(tween(220))
+                },
+                popEnterTransition = {
+                    slideInHorizontally(
+                        initialOffsetX = { -it / 3 },
+                        animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing)
+                    ) + fadeIn(tween(220))
+                },
+                popExitTransition = {
+                    slideOutHorizontally(
+                        targetOffsetX = { it },
+                        animationSpec = tween(durationMillis = 360, easing = FastOutSlowInEasing)
+                    ) + fadeOut(tween(320))
+                }
+            ) { backStackEntry ->
+                val registerMode = backStackEntry.arguments?.getBoolean("register") ?: false
+                val authViewModel: AuthViewModel = viewModel(
+                    key = "auth_flow_$authFlowSessionKey",
+                    factory = viewModelFactory {
+                        initializer { AuthViewModel(authRepository, initialRegisterMode = registerMode) }
+                    }
+                )
+                Column(Modifier.fillMaxSize()) {
+                    MinimalistTopBar { navController.popBackStack() }
+                    AuthScreen(
+                        viewModel = authViewModel,
+                        defaultRegisterMode = registerMode,
+                        onAuthenticated = {
+                            openAuthInRegisterMode = false
+                            navController.popBackStack()
+                        },
+                        showContinueAsGuest = false
+                    )
+                }
             }
 
             composable(NavScreen.CreateGroup.route) {
