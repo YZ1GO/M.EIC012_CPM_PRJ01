@@ -10,12 +10,19 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,26 +32,31 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.QrCodeScanner
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -52,12 +64,15 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
@@ -68,6 +83,8 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.cpm.cleave.ui.features.common.CameraPermissionPrompt
@@ -75,6 +92,7 @@ import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 
 @Composable
@@ -389,8 +407,12 @@ private fun JoinCodeScannerDialog(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
+    val scope = rememberCoroutineScope()
+    
+    // State to handle the "Success" moment
+    var isSuccess by remember { mutableStateOf(false) }
+    
     val barcodeScanner = remember {
         BarcodeScanning.getClient(
             BarcodeScannerOptions.Builder()
@@ -398,11 +420,21 @@ private fun JoinCodeScannerDialog(
                 .build()
         )
     }
-    val previewView = remember {
-        PreviewView(context).apply {
-            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-        }
-    }
+
+    // Laser Animation logic (stops when isSuccess is true)
+    val infiniteTransition = rememberInfiniteTransition(label = "scanner")
+    val scanLineProgress by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "laser"
+    )
+
+    // Success pulse animation
+    val successAlpha = remember { Animatable(0f) }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -411,61 +443,174 @@ private fun JoinCodeScannerDialog(
         }
     }
 
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        },
-        title = { Text("Scan Group QR") },
-        text = {
-            Column {
-                AndroidView(
-                    factory = {
-                        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-                        cameraProviderFuture.addListener(
-                            {
-                                val cameraProvider = cameraProviderFuture.get()
-                                val preview = Preview.Builder().build().also {
-                                    it.surfaceProvider = previewView.surfaceProvider
-                                }
-
-                                val analyzer = ImageAnalysis.Builder()
-                                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                                    .build()
-                                    .also {
-                                        it.setAnalyzer(
-                                            cameraExecutor,
-                                            JoinGroupQrAnalyzer(
-                                                barcodeScanner = barcodeScanner,
-                                                onCodeDetected = onQrCodeDetected
-                                            )
-                                        )
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+            // 1. Camera Preview
+            AndroidView(
+                factory = { ctx ->
+                    val previewView = PreviewView(ctx).apply {
+                        implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                        scaleType = PreviewView.ScaleType.FILL_CENTER
+                    }
+                    val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                    cameraProviderFuture.addListener({
+                        val cameraProvider = cameraProviderFuture.get()
+                        val preview = Preview.Builder().build().also {
+                            it.surfaceProvider = previewView.surfaceProvider
+                        }
+                        val analyzer = ImageAnalysis.Builder()
+                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                            .build()
+                            .also {
+                                it.setAnalyzer(cameraExecutor) { imageProxy ->
+                                    // Stop analyzing once we have a success
+                                    if (isSuccess) {
+                                        imageProxy.close()
+                                        return@setAnalyzer
                                     }
+                                    
+                                    // Customizing the analyzer call slightly to handle visual success
+                                    val analyzerLogic = JoinGroupQrAnalyzer(barcodeScanner) { code ->
+                                        if (!isSuccess) {
+                                            isSuccess = true
+                                            scope.launch {
+                                                successAlpha.animateTo(1f, tween(200))
+                                                delay(500) // Visual pause to see the hit
+                                                onQrCodeDetected(code)
+                                            }
+                                        }
+                                    }
+                                    analyzerLogic.analyze(imageProxy)
+                                }
+                            }
+                        try {
+                            cameraProvider.unbindAll()
+                            cameraProvider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analyzer)
+                        } catch (e: Exception) { e.printStackTrace() }
+                    }, ContextCompat.getMainExecutor(ctx))
+                    previewView
+                },
+                modifier = Modifier.fillMaxSize()
+            )
 
-                                cameraProvider.unbindAll()
-                                cameraProvider.bindToLifecycle(
-                                    lifecycleOwner,
-                                    CameraSelector.DEFAULT_BACK_CAMERA,
-                                    preview,
-                                    analyzer
-                                )
-                            },
-                            ContextCompat.getMainExecutor(context)
-                        )
+            // 2. Viewfinder Overlay
+            val primaryColor = MaterialTheme.colorScheme.primary
+            val successColor = Color(0xFF4CAF50) // Green for success
+            
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    // CRITICAL: graphicsLayer(alpha = 0.99f) fixes the black-hole issue in Dialogs
+                    .graphicsLayer(alpha = 0.99f) 
+            ) {
+                val width = size.width
+                val height = size.height
+                val boxSize = width * 0.7f
+                val left = (width - boxSize) / 2
+                val top = (height - boxSize) / 2
+                val right = left + boxSize
+                val bottom = top + boxSize
 
-                        previewView
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(260.dp)
-                        .background(Color.Black, RoundedCornerShape(10.dp))
+                // Draw Mask
+                drawRect(Color.Black.copy(alpha = 0.6f))
+
+                // Cut out the hole (Shows camera through)
+                drawRoundRect(
+                    color = Color.Transparent,
+                    topLeft = androidx.compose.ui.geometry.Offset(left, top),
+                    size = androidx.compose.ui.geometry.Size(boxSize, boxSize),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(20f),
+                    blendMode = BlendMode.Clear
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
-                Text("Point the camera at the group's QR code")
+                // Viewfinder Color (Turns green on success)
+                val accentColor = if (isSuccess) successColor else primaryColor
+
+                // Draw Corner Brackets
+                val lineLen = 60f
+                val stroke = 8f
+                drawLine(accentColor, androidx.compose.ui.geometry.Offset(left, top + lineLen), androidx.compose.ui.geometry.Offset(left, top), stroke)
+                drawLine(accentColor, androidx.compose.ui.geometry.Offset(left, top), androidx.compose.ui.geometry.Offset(left + lineLen, top), stroke)
+                drawLine(accentColor, androidx.compose.ui.geometry.Offset(right - lineLen, top), androidx.compose.ui.geometry.Offset(right, top), stroke)
+                drawLine(accentColor, androidx.compose.ui.geometry.Offset(right, top), androidx.compose.ui.geometry.Offset(right, top + lineLen), stroke)
+                drawLine(accentColor, androidx.compose.ui.geometry.Offset(left, bottom - lineLen), androidx.compose.ui.geometry.Offset(left, bottom), stroke)
+                drawLine(accentColor, androidx.compose.ui.geometry.Offset(left, bottom), androidx.compose.ui.geometry.Offset(left + lineLen, bottom), stroke)
+                drawLine(accentColor, androidx.compose.ui.geometry.Offset(right - lineLen, bottom), androidx.compose.ui.geometry.Offset(right, bottom), stroke)
+                drawLine(accentColor, androidx.compose.ui.geometry.Offset(right, bottom), androidx.compose.ui.geometry.Offset(right, bottom - lineLen), stroke)
+
+                // Laser Line (Only visible while scanning)
+                if (!isSuccess) {
+                    val lineY = top + (boxSize * scanLineProgress)
+                    drawLine(
+                        color = primaryColor.copy(alpha = 0.8f),
+                        start = androidx.compose.ui.geometry.Offset(left + 20f, lineY),
+                        end = androidx.compose.ui.geometry.Offset(right - 20f, lineY),
+                        strokeWidth = 4f
+                    )
+                }
+
+                // Success Dot/Highlight in the center
+                if (isSuccess) {
+                    drawCircle(
+                        color = successColor.copy(alpha = successAlpha.value * 0.4f),
+                        radius = 80f * successAlpha.value,
+                        center = androidx.compose.ui.geometry.Offset(width / 2, height / 2)
+                    )
+                    drawCircle(
+                        color = successColor,
+                        radius = 15f * successAlpha.value,
+                        center = androidx.compose.ui.geometry.Offset(width / 2, height / 2)
+                    )
+                }
+            }
+
+            // 3. Header Controls
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(WindowInsets.statusBars.asPaddingValues())
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = onDismiss,
+                        colors = IconButtonDefaults.iconButtonColors(containerColor = Color.Black.copy(alpha = 0.5f))
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                    }
+                    Text(
+                        text = if (isSuccess) "Code Captured!" else "Scan QR Code",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                    Spacer(modifier = Modifier.size(48.dp))
+                }
+                
+                Spacer(modifier = Modifier.height(24.dp))
+                
+                if (!isSuccess) {
+                    Surface(
+                        color = Color.Black.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(20.dp)
+                    ) {
+                        Text(
+                            text = "Align the code inside the square",
+                            color = Color.White.copy(alpha = 0.9f),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            fontSize = 14.sp
+                        )
+                    }
+                }
             }
         }
-    )
+    }
 }
