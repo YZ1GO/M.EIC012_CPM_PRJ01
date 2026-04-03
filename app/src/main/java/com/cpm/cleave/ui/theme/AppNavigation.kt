@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
@@ -291,42 +292,48 @@ fun BottomNavigationBar(
 
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                     val color = MaterialTheme.colorScheme.primary
-                    Box(
-                        modifier = Modifier
-                            .size(52.dp)
-                            .drawBehind {
-                                drawRoundRect(
-                                    color = color,
-                                    style = Stroke(width = 2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(15f, 15f), 0f)),
-                                    cornerRadius = CornerRadius(14.dp.toPx(), 14.dp.toPx())
-                                )
-                            }
-                            .clip(RoundedCornerShape(14.dp))
-                            .clickable { showActionMenu = !showActionMenu },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Default.Add, "Add", tint = color, modifier = Modifier.size(32.dp))
-                    }
+                    
+                    // Tight anchor container for the DropdownMenu centering
+                    Box {
+                        Box(
+                            modifier = Modifier
+                                .size(52.dp)
+                                .drawBehind {
+                                    drawRoundRect(
+                                        color = color,
+                                        style = Stroke(width = 2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(15f, 15f), 0f)),
+                                        cornerRadius = CornerRadius(14.dp.toPx(), 14.dp.toPx())
+                                    )
+                                }
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable { showActionMenu = !showActionMenu },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Add, "Add", tint = color, modifier = Modifier.size(32.dp))
+                        }
 
-                    DropdownMenu(
-                        expanded = showActionMenu,
-                        onDismissRequest = { showActionMenu = false },
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.background(MaterialTheme.colorScheme.surface).padding(4.dp)
-                    ) {
-                        DropdownMenuItem(
-                            leadingIcon = { Icon(Icons.Default.GroupAdd, null, tint = color, modifier = Modifier.size(20.dp)) },
-                            text = { Text("Create group", style = MaterialTheme.typography.titleSmall) },
-                            onClick = { showActionMenu = false; onCreateGroupClick() },
-                            modifier = Modifier.clip(RoundedCornerShape(12.dp)).padding(horizontal = 4.dp)
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        DropdownMenuItem(
-                            leadingIcon = { Icon(Icons.Default.Link, null, tint = color, modifier = Modifier.size(20.dp)) },
-                            text = { Text("Join group", style = MaterialTheme.typography.titleSmall) },
-                            onClick = { showActionMenu = false; onJoinGroupClick() },
-                            modifier = Modifier.clip(RoundedCornerShape(12.dp)).padding(horizontal = 4.dp)
-                        )
+                        DropdownMenu(
+                            expanded = showActionMenu,
+                            onDismissRequest = { showActionMenu = false },
+                            // offset adjusted horizontally to center the menu relative to the 52dp button
+                            offset = DpOffset(x = (-60).dp, y = 0.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.background(MaterialTheme.colorScheme.surface).padding(4.dp)
+                        ) {
+                            DropdownMenuItem(
+                                leadingIcon = { Icon(Icons.Default.GroupAdd, null, tint = color, modifier = Modifier.size(20.dp)) },
+                                text = { Text("Create group", style = MaterialTheme.typography.titleSmall) },
+                                onClick = { showActionMenu = false; onCreateGroupClick() },
+                                modifier = Modifier.clip(RoundedCornerShape(12.dp)).padding(horizontal = 4.dp)
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            DropdownMenuItem(
+                                leadingIcon = { Icon(Icons.Default.Link, null, tint = color, modifier = Modifier.size(20.dp)) },
+                                text = { Text("Join group", style = MaterialTheme.typography.titleSmall) },
+                                onClick = { showActionMenu = false; onJoinGroupClick() },
+                                modifier = Modifier.clip(RoundedCornerShape(12.dp)).padding(horizontal = 4.dp)
+                            )
+                        }
                     }
                 }
 
