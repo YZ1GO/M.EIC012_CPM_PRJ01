@@ -19,6 +19,7 @@ import com.cpm.cleave.model.Group
 import com.cpm.cleave.model.ReceiptItem
 import com.google.android.gms.tasks.Task
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
@@ -170,8 +171,10 @@ class GroupRepositoryImpl(
                     }
                 }
 
-                val initialLocalGroups = cache.loadGroups(userId)
-                trySend(initialLocalGroups)
+                if (!connectivityStatus.isNetworkAvailable()) {
+                    val initialLocalGroups = cache.loadGroups(userId)
+                    trySend(initialLocalGroups)
+                }
 
                 scope.launch {
                     refreshAndEmit()
@@ -606,7 +609,7 @@ class GroupRepositoryImpl(
                 flushPendingGroupSyncs()
 
                 warmExpensesCache(remoteGroups.map { it.id })
-                cache.loadGroups(effectiveUserId)
+                remoteGroups
             }.recoverCatching {
                 // Sign-out/sign-in can briefly race auth + rules propagation and return PERMISSION_DENIED.
                 // Retry once after a short delay before falling back to local cache.
@@ -620,7 +623,7 @@ class GroupRepositoryImpl(
 
                 retriedRemoteGroups.forEach { cache.upsertGroupWithMembers(it) }
                 warmExpensesCache(retriedRemoteGroups.map { it.id })
-                cache.loadGroups(effectiveUserId)
+                retriedRemoteGroups
             }
 
             val groups = remoteResult.getOrElse {
@@ -823,6 +826,11 @@ class GroupRepositoryImpl(
         userId: String,
         knownLocalGroupIds: List<String> = emptyList()
     ): List<Group> {
+        data class RemoteGroupPayload(
+            val group: Group,
+            val updatedAt: Long
+        )
+
         val discoveredGroupIds = mutableSetOf<String>()
 
         // Membership discovery by userId field.
@@ -883,16 +891,30 @@ class GroupRepositoryImpl(
                 }
                 .distinct()
 
-            Group(
-                id = groupSnapshot.id,
-                name = groupSnapshot.getString("name") ?: "Untitled group",
-                imageUrl = groupSnapshot.getString("imageUrl"),
-                currency = groupSnapshot.getString("currency") ?: "Euro",
-                ownerId = groupSnapshot.getString("ownerId"),
-                members = members,
-                joinCode = groupSnapshot.getString("joinCode") ?: "",
-                balances = emptyMap()
+            RemoteGroupPayload(
+                group = Group(
+                    id = groupSnapshot.id,
+                    name = groupSnapshot.getString("name") ?: "Untitled group",
+                    imageUrl = groupSnapshot.getString("imageUrl"),
+                    currency = groupSnapshot.getString("currency") ?: "Euro",
+                    ownerId = groupSnapshot.getString("ownerId"),
+                    members = members,
+                    joinCode = groupSnapshot.getString("joinCode") ?: "",
+                    balances = emptyMap()
+                ),
+                updatedAt = readUpdatedAtMillis(groupSnapshot)
             )
+        }
+            .sortedByDescending { it.updatedAt }
+            .map { it.group }
+    }
+
+    private fun readUpdatedAtMillis(snapshot: com.google.firebase.firestore.DocumentSnapshot): Long {
+        val rawValue = snapshot.get("updatedAt")
+        return when (rawValue) {
+            is Number -> rawValue.toLong()
+            is Timestamp -> rawValue.toDate().time
+            else -> snapshot.getTimestamp("updatedAt")?.toDate()?.time ?: 0L
         }
     }
 

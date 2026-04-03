@@ -468,6 +468,12 @@ class ExpenseRepositoryImpl(
             SetOptions.merge()
         )
 
+        batch.set(
+            groupRef,
+            mapOf("updatedAt" to now),
+            SetOptions.merge()
+        )
+
         payerContributions.forEach { (payerId, contributionAmount) ->
             val payerRef = expenseRef.collection("payers").document(payerId)
             batch.set(
