@@ -212,6 +212,7 @@ fun GroupDetailsScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var showQrDialog by remember { mutableStateOf(false) }
+    var showDeleteConfirmationDialog by remember { mutableStateOf(false) }
     var selectedReceiptUrl by remember { mutableStateOf<String?>(null) }
     val colorScheme = MaterialTheme.colorScheme
 
@@ -296,6 +297,37 @@ fun GroupDetailsScreen(
                 groupName = currentGroup.name,
                 joinCode = currentGroup.joinCode,
                 onDismiss = { showQrDialog = false }
+            )
+        }
+
+        if (showDeleteConfirmationDialog) {
+            AlertDialog(
+                onDismissRequest = {
+                    if (!uiState.isDeleting) showDeleteConfirmationDialog = false
+                },
+                title = { Text("Delete group") },
+                text = { Text("Are you sure you want to delete this group? This action cannot be undone.") },
+                dismissButton = {
+                    TextButton(
+                        onClick = { showDeleteConfirmationDialog = false },
+                        enabled = !uiState.isDeleting
+                    ) {
+                        Text("Cancel")
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            viewModel.onDeleteGroupClicked {
+                                showDeleteConfirmationDialog = false
+                                onGroupDeleted()
+                            }
+                        },
+                        enabled = !uiState.isDeleting
+                    ) {
+                        Text(if (uiState.isDeleting) "Deleting..." else "Delete")
+                    }
+                }
             )
         }
 
@@ -415,7 +447,7 @@ fun GroupDetailsScreen(
         if (uiState.canDeleteGroup) {
             Spacer(modifier = Modifier.height(12.dp))
             Button(
-                onClick = { viewModel.onDeleteGroupClicked(onGroupDeleted) },
+                onClick = { showDeleteConfirmationDialog = true },
                 enabled = !uiState.isDeleting,
                 colors = ButtonDefaults.buttonColors(containerColor = colorScheme.error),
                 shape = RoundedCornerShape(8.dp),
