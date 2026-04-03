@@ -76,6 +76,7 @@ import com.cpm.cleave.domain.usecase.GetGroupsUseCase
 import com.cpm.cleave.domain.usecase.RequestCreateExpenseUseCase
 import com.cpm.cleave.domain.usecase.RequestCreateGroupUseCase
 import com.cpm.cleave.domain.usecase.RequestDeleteGroupUseCase
+import com.cpm.cleave.domain.usecase.RequestExpelGroupMemberUseCase
 import com.cpm.cleave.domain.usecase.RequestJoinGroupUseCase
 import com.cpm.cleave.ui.features.addexpense.AddExpenseScreen
 import com.cpm.cleave.ui.features.addexpense.AddExpenseViewModel
@@ -392,7 +393,8 @@ fun MainScreen(
                                     expenseRepository = expenseRepository,
                                     authRepository = authRepository
                                 ),
-                                requestDeleteGroupUseCase = RequestDeleteGroupUseCase(groupRepository)
+                                requestDeleteGroupUseCase = RequestDeleteGroupUseCase(groupRepository),
+                                requestExpelGroupMemberUseCase = RequestExpelGroupMemberUseCase(groupRepository)
                             )
                         }
                     }

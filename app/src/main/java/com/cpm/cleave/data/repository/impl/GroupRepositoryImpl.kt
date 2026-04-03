@@ -319,6 +319,98 @@ class GroupRepositoryImpl(
         }
     }
 
+    override suspend fun expelMember(groupId: String, memberId: String): Result<Unit> {
+        return runCatching {
+            if (!connectivityStatus.isNetworkAvailable()) {
+                throw IllegalStateException("Removing a member requires an internet connection.")
+            }
+
+            val targetMemberId = memberId.trim()
+            if (targetMemberId.isBlank()) {
+                throw IllegalArgumentException("Invalid member id.")
+            }
+
+            val currentUserId = firebaseAuth.currentUser?.uid
+                ?: throw IllegalStateException("No authenticated Firebase user found.")
+
+            val remoteGroup = fetchSingleGroupFromRemote(groupId)
+                ?: throw IllegalArgumentException("Group not found.")
+
+            val ownerId = remoteGroup.ownerId?.takeIf { it.isNotBlank() }
+                ?: throw IllegalStateException("This group has no owner configured.")
+
+            if (ownerId != currentUserId) {
+                throw IllegalStateException("Only the group owner can remove members.")
+            }
+
+            if (targetMemberId == ownerId) {
+                throw IllegalStateException("The group owner cannot be removed.")
+            }
+
+            if (!remoteGroup.members.contains(targetMemberId)) {
+                throw IllegalArgumentException("Member is not part of this group.")
+            }
+
+            val groupRef = firestore.collection("groups").document(groupId)
+            val memberHasExpenses = memberHasAnyExpenseParticipation(
+                groupRef = groupRef,
+                memberId = targetMemberId
+            )
+
+            if (memberHasExpenses) {
+                throw IllegalStateException("This user is part of an expense and cannot be removed from the group.")
+            }
+
+            groupRef.collection("members")
+                .document(targetMemberId)
+                .delete()
+                .awaitTaskResult()
+
+            cache.removeUserFromGroup(groupId, targetMemberId)
+        }
+    }
+
+    private suspend fun memberHasAnyExpenseParticipation(
+        groupRef: com.google.firebase.firestore.DocumentReference,
+        memberId: String
+    ): Boolean {
+        val expensesSnapshot = groupRef.collection("expenses")
+            .get()
+            .awaitTaskResult()
+
+        for (expenseDoc in expensesSnapshot.documents) {
+            if (expenseDoc.getString("paidByUserId") == memberId) {
+                return true
+            }
+
+            val expenseRef = expenseDoc.reference
+
+            val payersSnapshot = expenseRef.collection("payers")
+                .get()
+                .awaitTaskResult()
+            val isPayer = payersSnapshot.documents.any { payerDoc ->
+                val payerUserId = payerDoc.getString("userId") ?: payerDoc.id
+                payerUserId == memberId
+            }
+            if (isPayer) {
+                return true
+            }
+
+            val splitsSnapshot = expenseRef.collection("splits")
+                .get()
+                .awaitTaskResult()
+            val isInSplit = splitsSnapshot.documents.any { splitDoc ->
+                val splitUserId = splitDoc.getString("userId") ?: splitDoc.id
+                splitUserId == memberId
+            }
+            if (isInSplit) {
+                return true
+            }
+        }
+
+        return false
+    }
+
     private suspend fun uploadGroupImageViaHttp(
         endpointUrl: String,
         payload: JSONObject

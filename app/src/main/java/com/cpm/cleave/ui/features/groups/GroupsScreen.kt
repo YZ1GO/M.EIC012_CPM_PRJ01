@@ -7,6 +7,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
@@ -331,6 +333,46 @@ fun GroupDetailsScreen(
             )
         }
 
+        uiState.selectedMemberForExpulsionId?.let { memberId ->
+            val memberName = uiState.userDisplayNames[memberId] ?: memberId
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissMemberExpulsionDialog() },
+                title = { Text("Remove member") },
+                text = {
+                    Column {
+                        Text(
+                            "Are you sure you want to remove $memberName from this group? " +
+                                "You can only remove members who are not part of any expense."
+                        )
+                        uiState.errorMessage?.let { message ->
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = message,
+                                color = MaterialTheme.colorScheme.error,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { viewModel.dismissMemberExpulsionDialog() },
+                        enabled = !uiState.isExpellingMember
+                    ) {
+                        Text("Cancel")
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = { viewModel.confirmMemberExpulsion() },
+                        enabled = !uiState.isExpellingMember
+                    ) {
+                        Text(if (uiState.isExpellingMember) "Removing..." else "Remove")
+                    }
+                }
+            )
+        }
+
         selectedReceiptUrl?.let { receiptUrl ->
             ReceiptImageDialog(
                 receiptUrl = receiptUrl,
@@ -338,7 +380,9 @@ fun GroupDetailsScreen(
             )
         }
 
-        uiState.errorMessage?.let { Text(it, color = colorScheme.error) }
+        if (uiState.selectedMemberForExpulsionId == null) {
+            uiState.errorMessage?.let { Text(it, color = colorScheme.error) }
+        }
 
         Column(modifier = sectionModifier) {
             SectionTitle("Members")
@@ -361,7 +405,16 @@ fun GroupDetailsScreen(
                     currentGroup.members.forEach { memberId ->
                         val memberName = uiState.userDisplayNames[memberId] ?: memberId
                         val memberPhotoUrl = uiState.userPhotoUrls[memberId]
-                        MemberAvatar(name = memberName, photoUrl = memberPhotoUrl)
+                        val canExpelMember = uiState.canDeleteGroup && memberId != currentGroup.ownerId
+                        MemberAvatar(
+                            name = memberName,
+                            photoUrl = memberPhotoUrl,
+                            onLongPress = if (canExpelMember) {
+                                { viewModel.onMemberLongPressed(memberId) }
+                            } else {
+                                null
+                            }
+                        )
                     }
                 }
             }
@@ -654,7 +707,11 @@ private fun HeaderChip(
 }
 
 @Composable
-private fun MemberAvatar(name: String, photoUrl: String? = null) {
+private fun MemberAvatar(
+    name: String,
+    photoUrl: String? = null,
+    onLongPress: (() -> Unit)? = null
+) {
     val initial = name.firstOrNull()?.uppercaseChar()?.toString() ?: "?"
     val avatarColors = listOf(
         Color(0xFF2563EB),
@@ -670,7 +727,18 @@ private fun MemberAvatar(name: String, photoUrl: String? = null) {
         modifier = Modifier
             .size(40.dp)
             .background(avatarColor, CircleShape)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f), CircleShape),
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f), CircleShape)
+            .then(
+                if (onLongPress != null) {
+                    Modifier.pointerInput(onLongPress) {
+                        detectTapGestures(
+                            onLongPress = { onLongPress() }
+                        )
+                    }
+                } else {
+                    Modifier
+                }
+            ),
         contentAlignment = Alignment.Center
     ) {
         val model = photoUrl?.takeIf { it.isNotBlank() }

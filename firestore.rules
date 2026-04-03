@@ -129,7 +129,7 @@ service cloud.firestore {
                 allow read: if signedIn() && isGroupMember(groupId);
                 allow create: if signedIn() && request.auth.uid == userId && validMemberPayload(userId);
                 allow update: if signedIn() && isGroupMember(groupId) && validMemberPayload(userId);
-                allow delete: if signedIn() && isGroupMember(groupId);
+                allow delete: if signedIn() && isGroupOwner(groupId);
             }
 
             match /expenses/{expenseId} {

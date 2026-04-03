@@ -339,6 +339,15 @@ class Cache(context: Context) {
         return groupMemberDao.isUserInGroup(groupId, userId)
     }
 
+    suspend fun removeUserFromGroup(groupId: String, userId: String): Boolean {
+        val member = groupMemberDao.getMembersOfGroup(groupId)
+            .firstOrNull { it.userId == userId }
+            ?: return false
+
+        groupMemberDao.removeMember(member)
+        return true
+    }
+
     private suspend fun ensureUserExists(userId: String) {
         if (userDao.getUserById(userId) != null) return
         userDao.insertUser(
