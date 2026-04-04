@@ -7,12 +7,16 @@ import com.cpm.cleave.data.local.entities.GroupMemberEntity
 import com.cpm.cleave.data.local.entities.ExpenseEntity
 import com.cpm.cleave.data.local.entities.ExpensePayerEntity
 import com.cpm.cleave.data.local.entities.ExpenseSplitEntity
+import com.cpm.cleave.data.local.entities.DebtEntity
 import com.cpm.cleave.data.local.entities.UserEntity
+import com.cpm.cleave.model.Debt
 import com.cpm.cleave.model.Expense
 import com.cpm.cleave.model.PayerContribution
 import com.cpm.cleave.model.ExpenseShare
 import com.cpm.cleave.model.Group
 import com.cpm.cleave.model.ReceiptItem
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -23,6 +27,7 @@ class Cache(context: Context) {
     private val expenseDao = database.expenseDao()
     private val expensePayerDao = database.expensePayerDao()
     private val expenseSplitDao = database.expenseSplitDao()
+    private val debtDao = database.debtDao()
     private val userDao = database.userDao()
 
     suspend fun saveGroups(groups: List<Group>) {
@@ -318,6 +323,46 @@ class Cache(context: Context) {
     suspend fun getExpensePayersForExpense(expenseId: String): List<PayerContribution> {
         return expensePayerDao.getPayersForExpense(expenseId).map { payer ->
             PayerContribution(userId = payer.userId, amount = payer.amount)
+        }
+    }
+
+    suspend fun getDebtsByGroup(groupId: String): List<Debt> {
+        return debtDao.getDebtsByGroup(groupId).map { entity ->
+            Debt(
+                fromUser = entity.fromUser,
+                toUser = entity.toUser,
+                amount = entity.amount
+            )
+        }
+    }
+
+    fun observeDebtsByGroup(groupId: String): Flow<List<Debt>> {
+        return debtDao.observeDebtsByGroup(groupId).map { entities ->
+            entities.map { entity ->
+                Debt(
+                    fromUser = entity.fromUser,
+                    toUser = entity.toUser,
+                    amount = entity.amount
+                )
+            }
+        }
+    }
+
+    suspend fun replaceDebtsForGroup(groupId: String, debts: List<Debt>) {
+        database.withTransaction {
+            debtDao.deleteDebtsByGroup(groupId)
+            if (debts.isNotEmpty()) {
+                debtDao.insertDebts(
+                    debts.map { debt ->
+                        DebtEntity(
+                            groupId = groupId,
+                            fromUser = debt.fromUser,
+                            toUser = debt.toUser,
+                            amount = debt.amount
+                        )
+                    }
+                )
+            }
         }
     }
 

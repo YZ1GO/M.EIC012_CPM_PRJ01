@@ -22,13 +22,16 @@ import androidx.room.PrimaryKey
         )
     ],
     indices = [
+        Index(value = ["groupId"]),
         Index(value = ["fromUser"]),
-        Index(value = ["toUser"])
+        Index(value = ["toUser"]),
+        Index(value = ["groupId", "fromUser", "toUser"], unique = true)
     ]
 )
 data class DebtEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Int = 0,
+    val groupId: String,
     val fromUser: String,
     val toUser: String,
     val amount: Double

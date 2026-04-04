@@ -8,8 +8,11 @@ import com.cpm.cleave.model.Expense
 import com.cpm.cleave.model.ExpenseShare
 import com.cpm.cleave.model.Group
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.runningFold
 import kotlin.math.min
 
 data class DebtReason(
@@ -38,6 +41,10 @@ class GetGroupDetailsUseCase(
     private val expenseRepository: IExpenseRepository,
     private val authRepository: IAuthRepository
 ) {
+    companion object {
+        private const val TAG = "GroupDetailsFlow"
+    }
+
     suspend fun execute(groupId: String): Result<GroupDetailsData> {
         val group = groupRepository.getGroupById(groupId)
             .getOrElse { return Result.failure(it) }
@@ -97,60 +104,118 @@ class GetGroupDetailsUseCase(
     fun observe(groupId: String): Flow<Result<GroupDetailsData>> {
         val groupsFlow = groupRepository.observeGroups()
         val expensesFlow = expenseRepository.observeExpensesByGroup(groupId)
+        val debtsFlow = expenseRepository.observeDebtsByGroup(groupId)
 
-        return combine(groupsFlow, expensesFlow) { groups, observedExpenses ->
-            groups to observedExpenses
+        data class ObserveState(
+            val group: Group? = null,
+            val expenses: List<Expense> = emptyList(),
+            val debts: List<Debt> = emptyList(),
+            val sharesByExpenseId: Map<String, List<ExpenseShare>> = emptyMap()
+        )
+
+        return combine(groupsFlow, expensesFlow, debtsFlow) { groups, observedExpenses, observedDebts ->
+            android.util.Log.d(
+                TAG,
+                "upstream groupId=$groupId groups=${groups.size} expenses=${observedExpenses.size} debts=${observedDebts.size}"
+            )
+            Triple(groups, observedExpenses, observedDebts)
         }
-            .map { (groups, observedExpenses) ->
-                val group = groups.firstOrNull { it.id == groupId }
-                    ?: return@map Result.failure(IllegalArgumentException("Group not found."))
+            .runningFold(ObserveState()) { previous, (groups, observedExpenses, observedDebts) ->
+                val freshGroup = groups.firstOrNull { it.id == groupId } ?: previous.group
 
-                val debts = expenseRepository.getDebtsByGroup(groupId)
-                    .getOrElse { return@map Result.failure(it) }
+                val sortedObservedExpenses = observedExpenses.sortedByDescending { it.date }
+                val stableExpenses = if (sortedObservedExpenses.isNotEmpty() || previous.expenses.isEmpty()) {
+                    sortedObservedExpenses
+                } else {
+                    previous.expenses
+                }
 
-                val sharesByExpenseId = expenseRepository.getExpenseSharesByGroup(groupId)
-                    .getOrElse { return@map Result.failure(it) }
+                val stableDebts = if (observedDebts.isNotEmpty() || stableExpenses.isEmpty()) {
+                    observedDebts
+                } else {
+                    previous.debts
+                }
 
-                val debtsWithReason = buildDebtReasons(
-                    debts = debts,
-                    expenses = observedExpenses,
-                    sharesByExpenseId = sharesByExpenseId
+                val freshShares = runCatching {
+                    expenseRepository.getExpenseSharesByGroup(groupId).getOrElse { emptyMap() }
+                }.getOrNull() ?: emptyMap()
+
+                val stableShares = stableExpenses.associate { expense ->
+                    val fresh = freshShares[expense.id].orEmpty()
+                    val previousForExpense = previous.sharesByExpenseId[expense.id].orEmpty()
+                    expense.id to if (fresh.isNotEmpty() || previousForExpense.isEmpty()) fresh else previousForExpense
+                }
+
+                android.util.Log.d(
+                    TAG,
+                    "stabilized groupId=$groupId groupPresent=${freshGroup != null} expenses=${stableExpenses.size} debts=${stableDebts.size} sharesExpenses=${stableShares.size} freshSharesExpenses=${freshShares.size}"
                 )
 
-                val currentUserId = authRepository.getCurrentUser().getOrNull()?.id
-                val userDisplayNames = resolveUserDisplayNames(
-                    group = group,
-                    expenses = observedExpenses,
-                    debts = debts,
-                    sharesByExpenseId = sharesByExpenseId,
-                    currentUserId = currentUserId
-                )
-                val userPhotoUrls = resolveUserPhotoUrls(
-                    group = group,
-                    expenses = observedExpenses,
-                    debts = debts,
-                    sharesByExpenseId = sharesByExpenseId
-                )
-                val userLastSeen = resolveUserLastSeen(
-                    group = group,
-                    expenses = observedExpenses,
-                    debts = debts,
-                    sharesByExpenseId = sharesByExpenseId
-                )
-
-                Result.success(
-                    GroupDetailsData(
-                        group = group,
-                        expenses = observedExpenses.sortedByDescending { it.date },
-                        debts = debts,
-                        debtsWithReason = debtsWithReason,
-                        userDisplayNames = userDisplayNames,
-                        userPhotoUrls = userPhotoUrls,
-                        userLastSeen = userLastSeen,
-                        currentUserId = currentUserId
-                    )
+                ObserveState(
+                    group = freshGroup,
+                    expenses = stableExpenses,
+                    debts = stableDebts,
+                    sharesByExpenseId = stableShares
                 )
             }
+            .drop(1)
+            .map { state ->
+                try {
+                    val group = state.group
+                        ?: return@map Result.failure(IllegalArgumentException("Group not found."))
+
+                    val debtsWithReason = buildDebtReasons(
+                        debts = state.debts,
+                        expenses = state.expenses,
+                        sharesByExpenseId = state.sharesByExpenseId
+                    )
+
+                    val debtsWithReasonCount = debtsWithReason.size
+                    val debtsWithoutReasonsCount = debtsWithReason.count { it.reasons.isEmpty() }
+                    android.util.Log.d(
+                        TAG,
+                        "mapped groupId=$groupId expenses=${state.expenses.size} debts=${state.debts.size} debtsWithReason=$debtsWithReasonCount debtsWithoutReasons=$debtsWithoutReasonsCount"
+                    )
+
+                    val currentUserId = authRepository.getCurrentUser().getOrNull()?.id
+                    val userDisplayNames = resolveUserDisplayNames(
+                        group = group,
+                        expenses = state.expenses,
+                        debts = state.debts,
+                        sharesByExpenseId = state.sharesByExpenseId,
+                        currentUserId = currentUserId
+                    )
+                    val userPhotoUrls = resolveUserPhotoUrls(
+                        group = group,
+                        expenses = state.expenses,
+                        debts = state.debts,
+                        sharesByExpenseId = state.sharesByExpenseId
+                    )
+                    val userLastSeen = resolveUserLastSeen(
+                        group = group,
+                        expenses = state.expenses,
+                        debts = state.debts,
+                        sharesByExpenseId = state.sharesByExpenseId
+                    )
+
+                    Result.success(
+                        GroupDetailsData(
+                            group = group,
+                            expenses = state.expenses,
+                            debts = state.debts,
+                            debtsWithReason = debtsWithReason,
+                            userDisplayNames = userDisplayNames,
+                            userPhotoUrls = userPhotoUrls,
+                            userLastSeen = userLastSeen,
+                            currentUserId = currentUserId
+                        )
+                    )
+                } catch (e: Exception) {
+                    android.util.Log.w("GetGroupDetails", "Error in observe: ${e.message}", e)
+                    Result.failure(e)
+                }
+            }
+            .distinctUntilChanged()  // Only emit if data actually changed
     }
 
     private fun buildDebtReasons(
@@ -163,7 +228,7 @@ class GetGroupDetailsUseCase(
         expenses
             .sortedBy { it.date }
             .forEach { expense ->
-                val label = expense.description.ifBlank { "Expense" }
+                val label = expense.description.ifBlank { "Unnamed expense" }
                 sharesByExpenseId[expense.id].orEmpty()
                     .forEach { share ->
                         val cents = toCents(share.amount)

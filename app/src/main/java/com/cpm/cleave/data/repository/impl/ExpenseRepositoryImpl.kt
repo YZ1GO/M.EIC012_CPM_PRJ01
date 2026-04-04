@@ -30,7 +30,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -168,10 +170,11 @@ class ExpenseRepositoryImpl(
                 return Result.success(localExpenses)
             }
 
-            flushPendingExpenseSyncs()
+            // Try to flush pending syncs but don't let it block the overall operation
+            runCatching { flushPendingExpenseSyncs() }
 
             val remoteResult = runCatching {
-                val remotePayload = withTimeoutOrNull(1500L) {
+                val remotePayload = withTimeoutOrNull(5000L) {
                     fetchExpensesFromRemote(groupId)
                 } ?: throw IllegalStateException("Remote expenses fetch timed out")
 
@@ -181,6 +184,7 @@ class ExpenseRepositoryImpl(
                     expenses = remoteExpenses,
                     sharesByExpenseId = sharesByExpenseId
                 )
+                recomputeAndPersistDebts(groupId)
                 cache.getExpensesByGroup(groupId)
             }
             
@@ -191,13 +195,30 @@ class ExpenseRepositoryImpl(
                 }
             )
         } catch (e: Exception) {
-            Result.failure(e)
+            // As a final fallback, return cached data if available
+            try {
+                val cachedExpenses = cache.getExpensesByGroup(groupId)
+                if (cachedExpenses.isNotEmpty()) {
+                    android.util.Log.w("ExpenseRepo", "Returning cached expenses (${cachedExpenses.size}) due to error: ${e.message}")
+                    Result.success(cachedExpenses)
+                } else {
+                    Result.failure(e)
+                }
+            } catch (cacheError: Exception) {
+                Result.failure(e)
+            }
         }
     }
 
+    override fun observeDebtsByGroup(groupId: String): Flow<List<Debt>> = flow {
+        runCatching { recomputeAndPersistDebts(groupId) }
+        emitAll(cache.observeDebtsByGroup(groupId))
+    }.distinctUntilChanged()
+
     override suspend fun getExpenseSharesByGroup(groupId: String): Result<Map<String, List<ExpenseShare>>> {
         return try {
-            val expenses = getExpensesByGroup(groupId).getOrElse { return Result.failure(it) }
+            // Keep this local to avoid remote refresh latency in detail/debt rendering paths.
+            val expenses = cache.getExpensesByGroup(groupId)
             val shares = expenses.associate { expense ->
                 expense.id to cache.getExpenseSharesForExpense(expense.id)
             }
@@ -209,33 +230,11 @@ class ExpenseRepositoryImpl(
 
     override suspend fun getDebtsByGroup(groupId: String): Result<List<Debt>> {
         return try {
-            val group = cache.getGroupById(groupId) ?: return Result.success(emptyList())
-            val expenses = cache.getExpensesByGroup(groupId)
-            val sharesByExpenseId = expenses.associate { expense ->
-                expense.id to cache.getExpenseSharesForExpense(expense.id)
-            }
+            val cachedDebts = cache.getDebtsByGroup(groupId)
+            if (cachedDebts.isNotEmpty()) return Result.success(cachedDebts)
 
-            // Remote member snapshots can briefly be incomplete during sync;
-            // include all participants seen in expenses/splits to keep debts stable.
-            val participantIds = mutableSetOf<String>()
-            participantIds.addAll(group.members)
-            expenses.forEach { expense ->
-                participantIds.add(expense.paidByUserId)
-                expense.payerContributions.forEach { contribution ->
-                    participantIds.add(contribution.userId)
-                }
-                sharesByExpenseId[expense.id].orEmpty().forEach { share ->
-                    participantIds.add(share.userId)
-                }
-            }
-
-            Result.success(
-                calculateDebtsUseCase.execute(
-                    groupMembers = participantIds.toList(),
-                    expenses = expenses,
-                    sharesByExpenseId = sharesByExpenseId
-                )
-            )
+            recomputeAndPersistDebts(groupId)
+            Result.success(cache.getDebtsByGroup(groupId))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -257,6 +256,7 @@ class ExpenseRepositoryImpl(
             }
 
             cache.deleteExpenseWithRelations(expenseId)
+            recomputeAndPersistDebts(groupId)
             pendingSyncStore.removePendingExpenseSync(groupId, expenseId)
             if (isPendingLocalOnly) {
                 pendingSyncStore.removePendingExpenseDeletion(groupId, expenseId)
@@ -340,6 +340,7 @@ class ExpenseRepositoryImpl(
                 imagePath = receiptImagePath,
                 receiptItems = receiptItems
             )
+            recomputeAndPersistDebts(groupId)
 
             val pendingPayloadJson = buildPendingExpensePayloadJson(
                 amount = amount,
@@ -448,6 +449,7 @@ class ExpenseRepositoryImpl(
                 imagePath = receiptImagePath,
                 receiptItems = receiptItems
             )
+            recomputeAndPersistDebts(groupId)
 
             val pendingPayloadJson = buildPendingExpensePayloadJson(
                 amount = amount,
@@ -675,6 +677,38 @@ class ExpenseRepositoryImpl(
         }
 
         return expenses to sharesByExpenseId
+    }
+
+    private suspend fun recomputeAndPersistDebts(groupId: String) {
+        val group = cache.getGroupById(groupId) ?: run {
+            cache.replaceDebtsForGroup(groupId, emptyList())
+            return
+        }
+
+        val expenses = cache.getExpensesByGroup(groupId)
+        val sharesByExpenseId = expenses.associate { expense ->
+            expense.id to cache.getExpenseSharesForExpense(expense.id)
+        }
+
+        val participantIds = mutableSetOf<String>()
+        participantIds.addAll(group.members)
+        expenses.forEach { expense ->
+            participantIds.add(expense.paidByUserId)
+            expense.payerContributions.forEach { contribution ->
+                participantIds.add(contribution.userId)
+            }
+            sharesByExpenseId[expense.id].orEmpty().forEach { share ->
+                participantIds.add(share.userId)
+            }
+        }
+
+        val debts = calculateDebtsUseCase.execute(
+            groupMembers = participantIds.toList(),
+            expenses = expenses,
+            sharesByExpenseId = sharesByExpenseId
+        )
+
+        cache.replaceDebtsForGroup(groupId, debts)
     }
 
     private suspend fun syncExpenseToRemote(

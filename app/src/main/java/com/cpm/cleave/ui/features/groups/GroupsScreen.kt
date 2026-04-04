@@ -899,7 +899,8 @@ fun GroupDetailsScreen(
                 val fromName = resolveDisplayName(uiState.userDisplayNames, debt.fromUser)
                 val toName = resolveDisplayName(uiState.userDisplayNames, debt.toUser)
                 val canSettleDebt = uiState.currentUserId == debt.fromUser
-                val reasonText = debtWithReason.reasons.joinToString(", ") { "${it.expenseLabel}" }.ifBlank { "No expense details" }
+                val reasonText = debtWithReason.reasons
+                    .joinToString(", ") { "${it.expenseLabel}" }
                 
                 Row(
                     modifier = Modifier
@@ -917,8 +918,10 @@ fun GroupDetailsScreen(
                             Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "owes", modifier = Modifier.padding(horizontal = 6.dp).size(16.dp), tint = colorScheme.onSurfaceVariant)
                             Text(toName, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = colorScheme.onSurface)
                         }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(reasonText, color = colorScheme.onSurfaceVariant, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (reasonText.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(reasonText, color = colorScheme.onSurfaceVariant, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                     Text(
                         text = "${currencySymbol}${"%.2f".format(Locale.getDefault(), debt.amount)}",

@@ -1,5 +1,6 @@
 package com.cpm.cleave.ui.features.groups
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cpm.cleave.domain.usecase.GetGroupDetailsUseCase
@@ -27,6 +28,14 @@ class GroupDetailsViewModel(
     private val requestUpdateGroupUseCase: RequestUpdateGroupUseCase
 ) : ViewModel() {
 
+    companion object {
+        private const val TAG = "GroupDetailsVM"
+        private const val INITIAL_RENDER_TIMEOUT_MS = 700L
+    }
+
+    private var hasAppliedInitialSnapshot = false
+    private var firstObserveSuccessAtMs: Long? = null
+
     private val _uiState = MutableStateFlow(GroupDetailsUiState())
     val uiState: StateFlow<GroupDetailsUiState> = _uiState.asStateFlow()
 
@@ -38,6 +47,7 @@ class GroupDetailsViewModel(
         viewModelScope.launch {
             getGroupDetailsUseCase.observe(groupId)
                 .catch { error ->
+                    Log.w(TAG, "observeGroupData catch groupId=$groupId error=${error.message}", error)
                     _uiState.update {
                         it.copy(
                             isLoading = false,
@@ -48,7 +58,44 @@ class GroupDetailsViewModel(
                 .collect { result ->
                     result
                         .onSuccess { data ->
+                            if (!hasAppliedInitialSnapshot) {
+                                val now = System.currentTimeMillis()
+                                if (firstObserveSuccessAtMs == null) firstObserveSuccessAtMs = now
+                                val elapsed = now - (firstObserveSuccessAtMs ?: now)
+
+                                val hasCoherentContent =
+                                    data.expenses.isNotEmpty() ||
+                                        data.debts.isNotEmpty() ||
+                                        data.debtsWithReason.any { debtWithReason -> debtWithReason.reasons.isNotEmpty() }
+                                val allowEmptyFallback =
+                                    elapsed >= INITIAL_RENDER_TIMEOUT_MS &&
+                                        data.expenses.isEmpty() &&
+                                        data.debts.isEmpty()
+
+                                if (!hasCoherentContent && !allowEmptyFallback) {
+                                    Log.d(
+                                        TAG,
+                                        "defer initial render groupId=$groupId elapsedMs=$elapsed expenses=${data.expenses.size} debts=${data.debts.size} debtsWithReason=${data.debtsWithReason.size}"
+                                    )
+                                    return@onSuccess
+                                }
+
+                                hasAppliedInitialSnapshot = true
+                                Log.d(
+                                    TAG,
+                                    "apply initial render groupId=$groupId elapsedMs=$elapsed coherent=$hasCoherentContent emptyFallback=$allowEmptyFallback"
+                                )
+                            }
+
+                            val emptyReasons = data.debtsWithReason.count { it.reasons.isEmpty() }
+                            Log.d(
+                                TAG,
+                                "collect success groupId=$groupId expenses=${data.expenses.size} debts=${data.debts.size} debtsWithReason=${data.debtsWithReason.size} debtsWithoutReasons=$emptyReasons"
+                            )
                             _uiState.update {
+                                val prevExpenses = it.expenses.size
+                                val prevDebts = it.debts.size
+                                val prevDebtsWithReason = it.debtsWithReason.size
                                 val preservedError = if (
                                     it.selectedMemberForProfileId != null ||
                                     it.selectedMemberForExpulsionId != null ||
@@ -59,13 +106,29 @@ class GroupDetailsViewModel(
                                 } else {
                                     null
                                 }
-                                it.copy(
+                                val stableExpenses = if (data.expenses.isNotEmpty() || it.expenses.isEmpty()) {
+                                    data.expenses
+                                } else {
+                                    it.expenses
+                                }
+                                val stableDebts = if (data.debts.isNotEmpty() || stableExpenses.isEmpty()) {
+                                    data.debts
+                                } else {
+                                    it.debts
+                                }
+                                val stableDebtsWithReason = if (data.debtsWithReason.isNotEmpty() || stableDebts.isEmpty()) {
+                                    data.debtsWithReason
+                                } else {
+                                    it.debtsWithReason
+                                }
+
+                                val nextState = it.copy(
                                     isLoading = false,
                                     currentUserId = data.currentUserId,
                                     group = data.group,
-                                    expenses = data.expenses,
-                                    debts = data.debts,
-                                    debtsWithReason = data.debtsWithReason,
+                                    expenses = stableExpenses,
+                                    debts = stableDebts,
+                                    debtsWithReason = stableDebtsWithReason,
                                     userDisplayNames = data.userDisplayNames,
                                     userPhotoUrls = data.userPhotoUrls,
                                     userLastSeen = data.userLastSeen,
@@ -73,9 +136,15 @@ class GroupDetailsViewModel(
                                     editedGroupName = if (it.isEditingGroup) it.editedGroupName else data.group.name,
                                     errorMessage = preservedError
                                 )
+                                Log.d(
+                                    TAG,
+                                    "ui update groupId=$groupId expenses=$prevExpenses->${nextState.expenses.size} debts=$prevDebts->${nextState.debts.size} debtsWithReason=$prevDebtsWithReason->${nextState.debtsWithReason.size}"
+                                )
+                                nextState
                             }
                         }
                         .onFailure { error ->
+                            Log.w(TAG, "collect failure groupId=$groupId error=${error.message}", error)
                             _uiState.update {
                                 it.copy(
                                     isLoading = false,
@@ -88,6 +157,8 @@ class GroupDetailsViewModel(
     }
 
     fun refreshGroupData() {
+        hasAppliedInitialSnapshot = false
+        firstObserveSuccessAtMs = null
         _uiState.update { it.copy(isLoading = true, errorMessage = null) }
 
         viewModelScope.launch {
@@ -104,13 +175,28 @@ class GroupDetailsViewModel(
                         } else {
                             null
                         }
+                        val stableExpenses = if (data.expenses.isNotEmpty() || it.expenses.isEmpty()) {
+                            data.expenses
+                        } else {
+                            it.expenses
+                        }
+                        val stableDebts = if (data.debts.isNotEmpty() || stableExpenses.isEmpty()) {
+                            data.debts
+                        } else {
+                            it.debts
+                        }
+                        val stableDebtsWithReason = if (data.debtsWithReason.isNotEmpty() || stableDebts.isEmpty()) {
+                            data.debtsWithReason
+                        } else {
+                            it.debtsWithReason
+                        }
                         it.copy(
                             isLoading = false,
                             currentUserId = data.currentUserId,
                             group = data.group,
-                            expenses = data.expenses,
-                            debts = data.debts,
-                            debtsWithReason = data.debtsWithReason,
+                            expenses = stableExpenses,
+                            debts = stableDebts,
+                            debtsWithReason = stableDebtsWithReason,
                             userDisplayNames = data.userDisplayNames,
                             userPhotoUrls = data.userPhotoUrls,
                             userLastSeen = data.userLastSeen,

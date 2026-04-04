@@ -35,7 +35,7 @@ import com.cpm.cleave.data.local.entities.UserEntity
         DebtEntity::class,
         PaymentEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class CleaveDatabase : RoomDatabase() {
@@ -65,7 +65,14 @@ abstract class CleaveDatabase : RoomDatabase() {
                     builder.fallbackToDestructiveMigration(dropAllTables = true)
                 }
 
-                builder.addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                builder.addMigrations(
+                    MIGRATION_2_3,
+                    MIGRATION_3_4,
+                    MIGRATION_4_5,
+                    MIGRATION_5_6,
+                    MIGRATION_6_7,
+                    MIGRATION_7_8
+                )
 
                 val instance = builder.build()
                 INSTANCE = instance
@@ -150,6 +157,40 @@ abstract class CleaveDatabase : RoomDatabase() {
                 if (!hasOwnerIdColumn) {
                     db.execSQL("ALTER TABLE groups ADD COLUMN ownerId TEXT")
                 }
+            }
+        }
+
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS debts_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        groupId TEXT NOT NULL,
+                        fromUser TEXT NOT NULL,
+                        toUser TEXT NOT NULL,
+                        amount REAL NOT NULL,
+                        FOREIGN KEY(fromUser) REFERENCES users(id) ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(toUser) REFERENCES users(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+
+                db.execSQL(
+                    """
+                    INSERT INTO debts_new (id, groupId, fromUser, toUser, amount)
+                    SELECT id, '', fromUser, toUser, amount FROM debts
+                    """.trimIndent()
+                )
+
+                db.execSQL("DROP TABLE debts")
+                db.execSQL("ALTER TABLE debts_new RENAME TO debts")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_debts_groupId ON debts(groupId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_debts_fromUser ON debts(fromUser)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_debts_toUser ON debts(toUser)")
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_debts_groupId_fromUser_toUser ON debts(groupId, fromUser, toUser)"
+                )
             }
         }
     }
