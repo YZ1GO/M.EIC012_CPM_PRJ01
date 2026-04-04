@@ -158,7 +158,8 @@ class GroupDetailsViewModel(
         _uiState.update {
             it.copy(
                 selectedDebtForPayment = null,
-                debtPaymentAmountInput = ""
+                debtPaymentAmountInput = "",
+                errorMessage = null
             )
         }
     }
@@ -361,7 +362,7 @@ class GroupDetailsViewModel(
 
     fun dismissExpenseDeletionDialog() {
         if (_uiState.value.isDeletingExpense) return
-        _uiState.update { it.copy(selectedExpenseForDeletionId = null) }
+        _uiState.update { it.copy(selectedExpenseForDeletionId = null, errorMessage = null) }
     }
 
     fun confirmExpenseDeletion() {
@@ -396,7 +397,11 @@ class GroupDetailsViewModel(
 
     fun dismissMemberExpulsionDialog() {
         if (_uiState.value.isExpellingMember) return
-        _uiState.update { it.copy(selectedMemberForExpulsionId = null) }
+        _uiState.update { it.copy(selectedMemberForExpulsionId = null, errorMessage = null) }
+    }
+
+    fun clearErrorMessage() {
+        _uiState.update { it.copy(errorMessage = null) }
     }
 
     fun confirmMemberExpulsion() {

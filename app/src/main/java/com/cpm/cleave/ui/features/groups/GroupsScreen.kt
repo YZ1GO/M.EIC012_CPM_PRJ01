@@ -710,10 +710,10 @@ fun GroupDetailsScreen(
         }
         if (showDeleteConfirmationDialog) {
             AlertDialog(
-                onDismissRequest = { if (!uiState.isDeleting) showDeleteConfirmationDialog = false },
+                onDismissRequest = { if (!uiState.isDeleting) { showDeleteConfirmationDialog = false; viewModel.clearErrorMessage() } },
                 title = { Text("Delete group") },
                 text = { Text("Are you sure you want to delete this group? This action cannot be undone.") },
-                dismissButton = { TextButton(onClick = { showDeleteConfirmationDialog = false }, enabled = !uiState.isDeleting) { Text("Cancel") } },
+                dismissButton = { TextButton(onClick = { showDeleteConfirmationDialog = false; viewModel.clearErrorMessage() }, enabled = !uiState.isDeleting) { Text("Cancel") } },
                 confirmButton = {
                     TextButton(
                         onClick = { viewModel.onDeleteGroupClicked { showDeleteConfirmationDialog = false; onGroupDeleted() } },
