@@ -316,6 +316,37 @@ class GroupRepositoryImpl(
         }
     }
 
+    override suspend fun updateGroup(group: Group): Result<Group> {
+        return runCatching {
+            if (!connectivityStatus.isNetworkAvailable()) {
+                throw IllegalStateException("Updating a group requires an internet connection.")
+            }
+
+            val currentUserId = firebaseAuth.currentUser?.uid
+                ?: throw IllegalStateException("No authenticated Firebase user found.")
+
+            val remoteGroup = fetchSingleGroupFromRemote(group.id)
+                ?: throw IllegalArgumentException("Group not found.")
+
+            val ownerId = remoteGroup.ownerId?.takeIf { it.isNotBlank() }
+                ?: throw IllegalStateException("This group has no owner configured.")
+
+            if (ownerId != currentUserId) {
+                throw IllegalStateException("Only the group owner can edit this group.")
+            }
+
+            val updatedGroup = remoteGroup.copy(
+                name = group.name.trim(),
+                imageUrl = group.imageUrl?.takeIf { it.isNotBlank() }
+            )
+
+            syncGroupToRemote(updatedGroup)
+            cache.upsertGroupWithMembers(updatedGroup)
+
+            updatedGroup
+        }
+    }
+
     override suspend fun uploadGroupImage(imageBytes: ByteArray): Result<String> {
         return runCatching {
             val baseUrl = BuildConfig.SUPABASE_UPLOAD_URL.trim().trimEnd('/')

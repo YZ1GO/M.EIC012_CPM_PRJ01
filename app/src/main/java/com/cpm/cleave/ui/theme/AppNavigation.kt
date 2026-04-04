@@ -310,7 +310,8 @@ fun MainScreen(
                                 requestSettleDebtUseCase = RequestSettleDebtUseCase(RequestCreateExpenseUseCase(expenseRepository)),
                                 requestDeleteExpenseUseCase = RequestDeleteExpenseUseCase(expenseRepository),
                                 requestDeleteGroupUseCase = RequestDeleteGroupUseCase(groupRepository),
-                                requestExpelGroupMemberUseCase = RequestExpelGroupMemberUseCase(groupRepository)
+                                requestExpelGroupMemberUseCase = RequestExpelGroupMemberUseCase(groupRepository),
+                                requestUpdateGroupUseCase = RequestUpdateGroupUseCase(groupRepository)
                             ) 
                         } 
                     }

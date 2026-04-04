@@ -3,6 +3,8 @@ package com.cpm.cleave.ui.features.groups
 import android.content.ClipData
 import android.content.Intent
 import android.graphics.Bitmap
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -33,8 +35,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
@@ -44,6 +49,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -94,6 +100,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.absoluteValue
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.offset
+import androidx.compose.material.icons.filled.AddAPhoto
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -389,7 +398,22 @@ fun GroupDetailsScreen(
     var showQrDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmationDialog by remember { mutableStateOf(false) }
     var selectedReceiptUrl by remember { mutableStateOf<String?>(null) }
+    var editSelectedImageUri by remember { mutableStateOf<String?>(null) }
+    var editSelectedImageBytes by remember { mutableStateOf<ByteArray?>(null) }
     val colorScheme = MaterialTheme.colorScheme
+
+    val pickEditImageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri == null) {
+            editSelectedImageUri = null
+            editSelectedImageBytes = null
+            return@rememberLauncherForActivityResult
+        }
+        val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+        editSelectedImageUri = uri.toString()
+        editSelectedImageBytes = bytes
+    }
 
     LaunchedEffect(Unit) { viewModel.refreshGroupData() }
 
@@ -421,16 +445,83 @@ fun GroupDetailsScreen(
         }
 
         val currencySymbol = getCurrencySymbolOnly(currentGroup.currency)
+        val groupImageModel = currentGroup.imageUrl?.takeIf { it.isNotBlank() }
+
+        LaunchedEffect(uiState.isEditingGroup) {
+            if (uiState.isEditingGroup) {
+                editSelectedImageUri = currentGroup.imageUrl
+                editSelectedImageBytes = null
+            } else {
+                editSelectedImageUri = null
+                editSelectedImageBytes = null
+            }
+        }
 
         // --- Header Section ---
-        Text(
-            text = currentGroup.name, 
-            fontSize = 32.sp, 
-            fontWeight = FontWeight.ExtraBold,
-            color = colorScheme.primary,
-            lineHeight = 36.sp
-        )
-        
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                AsyncImage(
+                    model = groupImageModel ?: R.drawable.default_group_image,
+                    contentDescription = "Group image",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = currentGroup.name,
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = colorScheme.primary,
+                        lineHeight = 32.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    if (uiState.canDeleteGroup) {
+                        IconButton(
+                            onClick = { viewModel.onEditGroupClicked() },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Edit group",
+                                tint = colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        IconButton(
+                            onClick = { showDeleteConfirmationDialog = true },
+                            enabled = !uiState.isDeleting,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Delete group",
+                                tint = colorScheme.error,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
         
         Row(
@@ -483,6 +574,140 @@ fun GroupDetailsScreen(
         if (showQrDialog) {
             GroupQrDialog(groupName = currentGroup.name, joinCode = currentGroup.joinCode, onDismiss = { showQrDialog = false })
         }
+        if (uiState.isEditingGroup) {
+            val maxNameLength = 30
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissGroupEditDialog() },
+                title = { 
+                    Text("Edit Group", fontWeight = FontWeight.Bold, fontSize = 22.sp, color = colorScheme.primary) 
+                },
+                text = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        val previewModel = editSelectedImageUri ?: currentGroup.imageUrl
+                        
+                        // Camera Badge Overlay Pattern
+                        Box(
+                            modifier = Modifier
+                                .size(104.dp)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    onClick = { pickEditImageLauncher.launch("image/*") }
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            AsyncImage(
+                                model = previewModel?.takeIf { it.isNotBlank() } ?: R.drawable.default_group_image,
+                                contentDescription = "Group image preview",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(96.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .border(2.dp, colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                            )
+                            
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .offset(x = (-2).dp, y = (-2).dp)
+                                    .size(32.dp)
+                                    .background(colorScheme.surface, CircleShape)
+                                    .padding(3.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(colorScheme.primaryContainer, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AddAPhoto,
+                                        contentDescription = "Change photo",
+                                        tint = colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(24.dp))
+                        
+                        Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
+                            Text(
+                                text = "Group Name", 
+                                fontSize = 13.sp,
+                                color = colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(bottom = 6.dp)
+                            )
+                            OutlinedTextField(
+                                value = uiState.editedGroupName,
+                                onValueChange = { 
+                                    if (it.length <= maxNameLength) viewModel.onEditedGroupNameChanged(it) 
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                supportingText = {
+                                    Text(
+                                        text = "${uiState.editedGroupName.length} / $maxNameLength",
+                                        modifier = Modifier.fillMaxWidth(),
+                                        textAlign = TextAlign.End,
+                                        color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                    )
+                                },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    unfocusedBorderColor = colorScheme.outlineVariant,
+                                    focusedBorderColor = colorScheme.primary
+                                )
+                            )
+                        }
+
+                        if (uiState.errorMessage != null) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(colorScheme.error.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = colorScheme.error, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(text = uiState.errorMessage!!, color = colorScheme.error, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { viewModel.dismissGroupEditDialog() }, enabled = !uiState.isUpdatingGroup) {
+                        Text("Cancel", color = colorScheme.onSurfaceVariant)
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.confirmGroupEdit(editSelectedImageBytes) {
+                                editSelectedImageUri = null
+                                editSelectedImageBytes = null
+                            }
+                        },
+                        enabled = !uiState.isUpdatingGroup,
+                        colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primary),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(if (uiState.isUpdatingGroup) "Saving..." else "Save")
+                    }
+                },
+                shape = RoundedCornerShape(24.dp),
+                containerColor = colorScheme.surface
+            )
+        }
         if (showDeleteConfirmationDialog) {
             AlertDialog(
                 onDismissRequest = { if (!uiState.isDeleting) showDeleteConfirmationDialog = false },
@@ -521,11 +746,15 @@ fun GroupDetailsScreen(
             val memberName = uiState.userDisplayNames[memberId] ?: memberId
             val photoUrl = resolveMemberPhotoUrl(uiState.userPhotoUrls, memberId)
             val lastSeen = uiState.userLastSeen[memberId]
+            val canRemoveMember = uiState.canDeleteGroup && memberId != currentGroup.ownerId
             
             MemberProfileDialog(
+                memberId = memberId,
                 memberName = memberName,
                 photoUrl = photoUrl,
                 lastSeenMs = lastSeen,
+                canRemoveMember = canRemoveMember,
+                onRemoveMember = { viewModel.onRemoveMemberClicked(memberId) },
                 onDismiss = { viewModel.dismissMemberProfileDialog() }
             )
         }
@@ -585,7 +814,7 @@ fun GroupDetailsScreen(
             ReceiptImageDialog(receiptUrl = receiptUrl, onDismiss = { selectedReceiptUrl = null })
         }
 
-        if (uiState.selectedMemberForExpulsionId == null && uiState.selectedDebtForPayment == null && uiState.selectedExpenseForDeletionId == null) {
+        if (uiState.selectedMemberForExpulsionId == null && uiState.selectedDebtForPayment == null && uiState.selectedExpenseForDeletionId == null && !uiState.isEditingGroup) {
             uiState.errorMessage?.let { Text(it, color = colorScheme.error) }
         }
 
@@ -595,19 +824,30 @@ fun GroupDetailsScreen(
         if (currentGroup.members.isEmpty()) {
             Text("No members in this group yet.", color = colorScheme.onSurfaceVariant, fontSize = 14.sp)
         } else {
+            val currentUserId = uiState.currentUserId
+            val orderedMembers = currentGroup.members.distinct().sortedWith(
+                compareBy<String> { memberId ->
+                    when {
+                        !currentUserId.isNullOrBlank() && memberId == currentUserId -> 0
+                        memberId == currentGroup.ownerId -> 1
+                        else -> 2
+                    }
+                }.thenBy { memberId ->
+                    currentGroup.members.indexOf(memberId)
+                }
+            )
+
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                currentGroup.members.forEach { memberId ->
+                orderedMembers.forEach { memberId ->
                     val memberName = uiState.userDisplayNames[memberId] ?: memberId
                     val memberPhotoUrl = resolveMemberPhotoUrl(uiState.userPhotoUrls, memberId)
-                    val canExpelMember = uiState.canDeleteGroup && memberId != currentGroup.ownerId
                     MemberAvatar(
                         name = memberName,
                         photoUrl = memberPhotoUrl,
-                        onTap = { viewModel.onMemberClicked(memberId) },
-                        onLongPress = if (canExpelMember) { { viewModel.onMemberLongPressed(memberId) } } else null
+                        onTap = { viewModel.onMemberClicked(memberId) }
                     )
                 }
             }
@@ -982,8 +1222,7 @@ private fun resolveMemberPhotoUrl(
 private fun MemberAvatar(
     name: String,
     photoUrl: String? = null,
-    onTap: (() -> Unit)? = null,
-    onLongPress: (() -> Unit)? = null
+    onTap: (() -> Unit)? = null
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
@@ -991,12 +1230,9 @@ private fun MemberAvatar(
                 .size(48.dp)
                 .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
                 .then(
-                    if (onTap != null || onLongPress != null) {
-                        Modifier.pointerInput(onTap, onLongPress) {
-                            detectTapGestures(
-                                onTap = { onTap?.invoke() },
-                                onLongPress = { onLongPress?.invoke() }
-                            )
+                    if (onTap != null) {
+                        Modifier.pointerInput(onTap) {
+                            detectTapGestures(onTap = { onTap() })
                         }
                     } else {
                         Modifier
@@ -1026,9 +1262,12 @@ private fun MemberAvatar(
 
 @Composable
 private fun MemberProfileDialog(
+    memberId: String,
     memberName: String,
     photoUrl: String?,
     lastSeenMs: Long?,
+    canRemoveMember: Boolean,
+    onRemoveMember: () -> Unit,
     onDismiss: () -> Unit
 ) {
     AlertDialog(
@@ -1066,6 +1305,17 @@ private fun MemberProfileDialog(
                     color = MaterialTheme.colorScheme.onSurface,
                     textAlign = TextAlign.Center
                 )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = memberId,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
                 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -1091,6 +1341,20 @@ private fun MemberProfileDialog(
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
+                    }
+                }
+
+                if (canRemoveMember) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    TextButton(onClick = onRemoveMember) {
+                        Icon(
+                            imageVector = Icons.Default.PersonRemove,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Remove member", color = MaterialTheme.colorScheme.error)
                     }
                 }
             }

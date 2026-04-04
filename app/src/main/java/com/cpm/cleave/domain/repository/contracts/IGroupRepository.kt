@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.Flow
 
 interface IGroupRepository {
     suspend fun createGroup(name: String, currency: String, imageUrl: String?): Result<Group>
+    suspend fun updateGroup(group: Group): Result<Group>
     suspend fun uploadGroupImage(imageBytes: ByteArray): Result<String>
     suspend fun deleteGroup(groupId: String): Result<Unit>
     suspend fun expelMember(groupId: String, memberId: String): Result<Unit>
