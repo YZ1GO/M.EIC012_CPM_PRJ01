@@ -11,6 +11,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -34,6 +37,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -47,6 +52,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -85,13 +92,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.AsyncImage
 import com.cpm.cleave.R
 import com.cpm.cleave.model.Expense
 import com.cpm.cleave.model.Group
+import com.cpm.cleave.ui.features.creategroup.globalCurrencies
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.delay
@@ -100,9 +105,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.absoluteValue
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.offset
-import androidx.compose.material.icons.filled.AddAPhoto
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -390,7 +392,6 @@ fun GroupDetailsScreen(
     onGroupDeleted: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val lifecycleOwner = LocalLifecycleOwner.current
     val clipboard = LocalClipboard.current
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -413,18 +414,6 @@ fun GroupDetailsScreen(
         val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
         editSelectedImageUri = uri.toString()
         editSelectedImageBytes = bytes
-    }
-
-    LaunchedEffect(Unit) { viewModel.refreshGroupData() }
-
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                viewModel.refreshGroupData()
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     Column(
@@ -574,8 +563,10 @@ fun GroupDetailsScreen(
         if (showQrDialog) {
             GroupQrDialog(groupName = currentGroup.name, joinCode = currentGroup.joinCode, onDismiss = { showQrDialog = false })
         }
+        
         if (uiState.isEditingGroup) {
             val maxNameLength = 30
+            var showCurrencyDropdown by remember { mutableStateOf(false) }
             AlertDialog(
                 onDismissRequest = { viewModel.dismissGroupEditDialog() },
                 title = { 
@@ -666,6 +657,64 @@ fun GroupDetailsScreen(
                                     focusedBorderColor = colorScheme.primary
                                 )
                             )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
+                            Text(
+                                text = "Group Currency",
+                                fontSize = 13.sp,
+                                color = colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(bottom = 6.dp)
+                            )
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { showCurrencyDropdown = true }
+                            ) {
+                                OutlinedTextField(
+                                    value = formatCurrencySymbolAndCode(uiState.editedCurrencyCode),
+                                    onValueChange = { },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true,
+                                    readOnly = true,
+                                    enabled = false,
+                                    shape = RoundedCornerShape(12.dp),
+                                    trailingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.ArrowDropDown,
+                                            contentDescription = "Select currency"
+                                        )
+                                    },
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        unfocusedBorderColor = colorScheme.outlineVariant,
+                                        focusedBorderColor = colorScheme.primary,
+                                        disabledBorderColor = colorScheme.outlineVariant,
+                                        disabledTextColor = colorScheme.onSurface,
+                                        disabledTrailingIconColor = colorScheme.onSurfaceVariant
+                                    )
+                                )
+
+                                DropdownMenu(
+                                    expanded = showCurrencyDropdown,
+                                    onDismissRequest = { showCurrencyDropdown = false },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 320.dp)
+                                ) {
+                                    globalCurrencies.forEach { currency ->
+                                        DropdownMenuItem(
+                                            text = { Text("${currency.symbol} ${currency.code} - ${currency.name}") },
+                                            onClick = {
+                                                viewModel.onEditedCurrencyChanged(currency.code)
+                                                showCurrencyDropdown = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
                         }
 
                         if (uiState.errorMessage != null) {
@@ -781,33 +830,89 @@ fun GroupDetailsScreen(
         uiState.selectedDebtForPayment?.let { selectedDebt ->
             val fromName = resolveDisplayName(uiState.userDisplayNames, selectedDebt.fromUser)
             val toName = resolveDisplayName(uiState.userDisplayNames, selectedDebt.toUser)
+            
             AlertDialog(
                 onDismissRequest = { viewModel.dismissDebtPaymentDialog() },
-                title = { Text("Pay debt") },
+                title = { 
+                    Text("Settle Debt", fontWeight = FontWeight.Bold, fontSize = 22.sp, color = colorScheme.primary) 
+                },
                 text = {
-                    Column {
-                        Text("$fromName will pay $toName")
-                        Spacer(modifier = Modifier.height(8.dp))
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Text(fromName, fontWeight = FontWeight.Bold, color = colorScheme.onSurface)
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowForward, 
+                                contentDescription = null, 
+                                modifier = Modifier.padding(horizontal = 8.dp).size(16.dp), 
+                                tint = colorScheme.onSurfaceVariant
+                            )
+                            Text(toName, fontWeight = FontWeight.Bold, color = colorScheme.onSurface)
+                        }
+
+                        Spacer(modifier = Modifier.height(24.dp))
+
                         OutlinedTextField(
                             value = uiState.debtPaymentAmountInput,
                             onValueChange = { viewModel.onDebtPaymentAmountChanged(it) },
-                            label = { Text("Amount") },
+                            label = { Text("Payment Amount") },
+                            leadingIcon = { Text(currencySymbol, color = colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp)) },
                             singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                unfocusedBorderColor = colorScheme.outlineVariant,
+                                focusedBorderColor = colorScheme.primary
+                            )
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(text = "Maximum: ${currencySymbol}${"%.2f".format(Locale.getDefault(), selectedDebt.amount)}", color = colorScheme.onSurfaceVariant, fontSize = 12.sp)
-                        uiState.errorMessage?.let { message ->
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(text = message, color = colorScheme.error, fontSize = 13.sp)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Maximum: ${currencySymbol}${"%.2f".format(Locale.getDefault(), selectedDebt.amount)}",
+                            color = colorScheme.onSurfaceVariant,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(start = 4.dp)
+                        )
+
+                        if (uiState.errorMessage != null) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(colorScheme.error.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = colorScheme.error, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(text = uiState.errorMessage!!, color = colorScheme.error, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            }
                         }
                     }
                 },
-                dismissButton = { TextButton(onClick = { viewModel.dismissDebtPaymentDialog() }, enabled = !uiState.isSettlingDebt) { Text("Cancel") } },
+                dismissButton = {
+                    TextButton(onClick = { viewModel.dismissDebtPaymentDialog() }, enabled = !uiState.isSettlingDebt) {
+                        Text("Cancel", color = colorScheme.onSurfaceVariant)
+                    }
+                },
                 confirmButton = {
-                    TextButton(onClick = { viewModel.confirmDebtPayment() }, enabled = !uiState.isSettlingDebt) { Text(if (uiState.isSettlingDebt) "Paying..." else "Pay") }
-                }
+                    Button(
+                        onClick = { viewModel.confirmDebtPayment() },
+                        enabled = !uiState.isSettlingDebt,
+                        colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primary),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(if (uiState.isSettlingDebt) "Processing..." else "Pay")
+                    }
+                },
+                shape = RoundedCornerShape(24.dp),
+                containerColor = colorScheme.surface
             )
         }
         selectedReceiptUrl?.let { receiptUrl ->
@@ -861,8 +966,8 @@ fun GroupDetailsScreen(
         
         val currentUserId = uiState.currentUserId
         if (!currentUserId.isNullOrBlank()) {
-            val totalYouOwe = uiState.debts.filter { it.fromUser == currentUserId }.sumOf { it.amount }
-            val totalOwedToYou = uiState.debts.filter { it.toUser == currentUserId }.sumOf { it.amount }
+            val totalYouOwe = uiState.totalYouOwe
+            val totalOwedToYou = uiState.totalOwedToYou
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Surface(

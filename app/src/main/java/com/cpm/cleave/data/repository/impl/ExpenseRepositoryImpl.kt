@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
@@ -84,8 +85,8 @@ class ExpenseRepositoryImpl(
         return authSessionStore.observeActiveUser()
         .distinctUntilChanged { old, new -> old?.id == new?.id }
         .flatMapLatest { user ->
-            // If no user, emit empty
-            if (user == null) return@flatMapLatest kotlinx.coroutines.flow.flowOf(emptyList())
+            // During transient auth swaps, avoid emitting an empty snapshot that clears UI.
+            if (user == null) return@flatMapLatest emptyFlow()
 
             callbackFlow {
                 val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -681,11 +682,19 @@ class ExpenseRepositoryImpl(
 
     private suspend fun recomputeAndPersistDebts(groupId: String) {
         val group = cache.getGroupById(groupId) ?: run {
-            cache.replaceDebtsForGroup(groupId, emptyList())
+            // Group visibility can be transient during sync/auth transitions.
+            // Do not wipe persisted debts on temporary cache misses.
             return
         }
 
         val expenses = cache.getExpensesByGroup(groupId)
+        val existingDebts = cache.getDebtsByGroup(groupId)
+
+        // Preserve previous debt snapshot while expenses are transiently unavailable.
+        if (expenses.isEmpty() && existingDebts.isNotEmpty()) {
+            return
+        }
+
         val sharesByExpenseId = expenses.associate { expense ->
             expense.id to cache.getExpenseSharesForExpense(expense.id)
         }

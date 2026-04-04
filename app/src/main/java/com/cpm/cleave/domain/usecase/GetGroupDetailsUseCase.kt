@@ -30,6 +30,8 @@ data class GroupDetailsData(
     val expenses: List<Expense>,
     val debts: List<Debt>,
     val debtsWithReason: List<DebtWithReason>,
+    val totalYouOwe: Double,
+    val totalOwedToYou: Double,
     val userDisplayNames: Map<String, String>,
     val userPhotoUrls: Map<String, String>,
     val userLastSeen: Map<String, Long>,
@@ -67,6 +69,10 @@ class GetGroupDetailsUseCase(
         )
 
         val currentUserId = authRepository.getCurrentUser().getOrNull()?.id
+        val (totalYouOwe, totalOwedToYou) = calculateDebtTotals(
+            debts = debts,
+            currentUserId = currentUserId
+        )
         val userDisplayNames = resolveUserDisplayNames(
             group = group,
             expenses = expenses,
@@ -93,6 +99,8 @@ class GetGroupDetailsUseCase(
                 expenses = expenses,
                 debts = debts,
                 debtsWithReason = debtsWithReason,
+                totalYouOwe = totalYouOwe,
+                totalOwedToYou = totalOwedToYou,
                 userDisplayNames = userDisplayNames,
                 userPhotoUrls = userPhotoUrls,
                 userLastSeen = userLastSeen,
@@ -178,6 +186,10 @@ class GetGroupDetailsUseCase(
                     )
 
                     val currentUserId = authRepository.getCurrentUser().getOrNull()?.id
+                    val (totalYouOwe, totalOwedToYou) = calculateDebtTotals(
+                        debts = state.debts,
+                        currentUserId = currentUserId
+                    )
                     val userDisplayNames = resolveUserDisplayNames(
                         group = group,
                         expenses = state.expenses,
@@ -204,6 +216,8 @@ class GetGroupDetailsUseCase(
                             expenses = state.expenses,
                             debts = state.debts,
                             debtsWithReason = debtsWithReason,
+                            totalYouOwe = totalYouOwe,
+                            totalOwedToYou = totalOwedToYou,
                             userDisplayNames = userDisplayNames,
                             userPhotoUrls = userPhotoUrls,
                             userLastSeen = userLastSeen,
@@ -363,6 +377,16 @@ class GetGroupDetailsUseCase(
 
     private fun toCents(amount: Double): Long {
         return kotlin.math.round(amount * 100.0).toLong()
+    }
+
+    private fun calculateDebtTotals(
+        debts: List<Debt>,
+        currentUserId: String?
+    ): Pair<Double, Double> {
+        if (currentUserId.isNullOrBlank()) return 0.0 to 0.0
+        val totalYouOwe = debts.filter { it.fromUser == currentUserId }.sumOf { it.amount }
+        val totalOwedToYou = debts.filter { it.toUser == currentUserId }.sumOf { it.amount }
+        return totalYouOwe to totalOwedToYou
     }
 
     private fun normalizeUserId(rawUserId: String): String {

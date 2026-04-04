@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cpm.cleave.domain.usecase.GetGroupDetailsUseCase
+import com.cpm.cleave.domain.usecase.GroupDetailsData
 import com.cpm.cleave.domain.usecase.RequestDeleteExpenseUseCase
 import com.cpm.cleave.domain.usecase.RequestDeleteGroupUseCase
 import com.cpm.cleave.domain.usecase.RequestExpelGroupMemberUseCase
@@ -11,6 +12,7 @@ import com.cpm.cleave.domain.usecase.RequestSettleDebtUseCase
 import com.cpm.cleave.domain.usecase.RequestUpdateGroupUseCase
 import com.cpm.cleave.model.Debt
 import com.cpm.cleave.model.Group
+import java.util.Locale
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -31,6 +33,7 @@ class GroupDetailsViewModel(
     companion object {
         private const val TAG = "GroupDetailsVM"
         private const val INITIAL_RENDER_TIMEOUT_MS = 700L
+        private val lastSnapshotByGroupId = mutableMapOf<String, GroupDetailsData>()
     }
 
     private var hasAppliedInitialSnapshot = false
@@ -40,7 +43,32 @@ class GroupDetailsViewModel(
     val uiState: StateFlow<GroupDetailsUiState> = _uiState.asStateFlow()
 
     init {
+        restoreLastSnapshotIfAvailable()
         observeGroupData()
+    }
+
+    private fun restoreLastSnapshotIfAvailable() {
+        val cached = lastSnapshotByGroupId[groupId] ?: return
+        _uiState.update {
+            it.copy(
+                isLoading = true,
+                currentUserId = cached.currentUserId,
+                group = cached.group,
+                expenses = cached.expenses,
+                debts = cached.debts,
+                debtsWithReason = cached.debtsWithReason,
+                totalYouOwe = cached.totalYouOwe,
+                totalOwedToYou = cached.totalOwedToYou,
+                userDisplayNames = cached.userDisplayNames,
+                userPhotoUrls = cached.userPhotoUrls,
+                userLastSeen = cached.userLastSeen,
+                canDeleteGroup = !cached.group.ownerId.isNullOrBlank() && cached.group.ownerId == cached.currentUserId,
+                editedGroupName = if (it.isEditingGroup) it.editedGroupName else cached.group.name
+            )
+        }
+        // Keep gate active so initial live emissions still need a coherent snapshot.
+        hasAppliedInitialSnapshot = false
+        firstObserveSuccessAtMs = null
     }
 
     private fun observeGroupData() {
@@ -64,9 +92,7 @@ class GroupDetailsViewModel(
                                 val elapsed = now - (firstObserveSuccessAtMs ?: now)
 
                                 val hasCoherentContent =
-                                    data.expenses.isNotEmpty() ||
-                                        data.debts.isNotEmpty() ||
-                                        data.debtsWithReason.any { debtWithReason -> debtWithReason.reasons.isNotEmpty() }
+                                    data.expenses.isNotEmpty()
                                 val allowEmptyFallback =
                                     elapsed >= INITIAL_RENDER_TIMEOUT_MS &&
                                         data.expenses.isEmpty() &&
@@ -92,6 +118,9 @@ class GroupDetailsViewModel(
                                 TAG,
                                 "collect success groupId=$groupId expenses=${data.expenses.size} debts=${data.debts.size} debtsWithReason=${data.debtsWithReason.size} debtsWithoutReasons=$emptyReasons"
                             )
+                            if (data.expenses.isNotEmpty() || data.debts.isNotEmpty()) {
+                                lastSnapshotByGroupId[groupId] = data
+                            }
                             _uiState.update {
                                 val prevExpenses = it.expenses.size
                                 val prevDebts = it.debts.size
@@ -121,18 +150,23 @@ class GroupDetailsViewModel(
                                 } else {
                                     it.debtsWithReason
                                 }
+                                val stableCurrentUserId = data.currentUserId ?: it.currentUserId
+                                val stableTotalYouOwe = if (data.currentUserId != null) data.totalYouOwe else it.totalYouOwe
+                                val stableTotalOwedToYou = if (data.currentUserId != null) data.totalOwedToYou else it.totalOwedToYou
 
                                 val nextState = it.copy(
                                     isLoading = false,
-                                    currentUserId = data.currentUserId,
+                                    currentUserId = stableCurrentUserId,
                                     group = data.group,
                                     expenses = stableExpenses,
                                     debts = stableDebts,
                                     debtsWithReason = stableDebtsWithReason,
+                                    totalYouOwe = stableTotalYouOwe,
+                                    totalOwedToYou = stableTotalOwedToYou,
                                     userDisplayNames = data.userDisplayNames,
                                     userPhotoUrls = data.userPhotoUrls,
                                     userLastSeen = data.userLastSeen,
-                                    canDeleteGroup = !data.group.ownerId.isNullOrBlank() && data.group.ownerId == data.currentUserId,
+                                    canDeleteGroup = !data.group.ownerId.isNullOrBlank() && data.group.ownerId == stableCurrentUserId,
                                     editedGroupName = if (it.isEditingGroup) it.editedGroupName else data.group.name,
                                     errorMessage = preservedError
                                 )
@@ -157,9 +191,20 @@ class GroupDetailsViewModel(
     }
 
     fun refreshGroupData() {
-        hasAppliedInitialSnapshot = false
-        firstObserveSuccessAtMs = null
-        _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+        val currentState = _uiState.value
+        val hasVisibleContent =
+            currentState.group != null ||
+                currentState.expenses.isNotEmpty() ||
+                currentState.debts.isNotEmpty() ||
+                currentState.debtsWithReason.isNotEmpty()
+
+        if (!hasVisibleContent) {
+            hasAppliedInitialSnapshot = false
+            firstObserveSuccessAtMs = null
+            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+        } else {
+            _uiState.update { it.copy(errorMessage = null) }
+        }
 
         viewModelScope.launch {
             getGroupDetailsUseCase.execute(groupId)
@@ -190,17 +235,22 @@ class GroupDetailsViewModel(
                         } else {
                             it.debtsWithReason
                         }
+                        val stableCurrentUserId = data.currentUserId ?: it.currentUserId
+                        val stableTotalYouOwe = if (data.currentUserId != null) data.totalYouOwe else it.totalYouOwe
+                        val stableTotalOwedToYou = if (data.currentUserId != null) data.totalOwedToYou else it.totalOwedToYou
                         it.copy(
                             isLoading = false,
-                            currentUserId = data.currentUserId,
+                            currentUserId = stableCurrentUserId,
                             group = data.group,
                             expenses = stableExpenses,
                             debts = stableDebts,
                             debtsWithReason = stableDebtsWithReason,
+                            totalYouOwe = stableTotalYouOwe,
+                            totalOwedToYou = stableTotalOwedToYou,
                             userDisplayNames = data.userDisplayNames,
                             userPhotoUrls = data.userPhotoUrls,
                             userLastSeen = data.userLastSeen,
-                            canDeleteGroup = !data.group.ownerId.isNullOrBlank() && data.group.ownerId == data.currentUserId,
+                            canDeleteGroup = !data.group.ownerId.isNullOrBlank() && data.group.ownerId == stableCurrentUserId,
                             editedGroupName = if (it.isEditingGroup) it.editedGroupName else data.group.name,
                             errorMessage = preservedError
                         )
@@ -226,7 +276,7 @@ class GroupDetailsViewModel(
         _uiState.update {
             it.copy(
                 selectedDebtForPayment = debt,
-                debtPaymentAmountInput = "${debt.amount}",
+                debtPaymentAmountInput = String.format(Locale.getDefault(), "%.2f", debt.amount),
                 errorMessage = null
             )
         }
@@ -328,6 +378,7 @@ class GroupDetailsViewModel(
             it.copy(
                 isEditingGroup = true,
                 editedGroupName = group.name,
+                editedCurrencyCode = group.currency,
                 errorMessage = null
             )
         }
@@ -335,6 +386,10 @@ class GroupDetailsViewModel(
 
     fun onEditedGroupNameChanged(value: String) {
         _uiState.update { it.copy(editedGroupName = value, errorMessage = null) }
+    }
+
+    fun onEditedCurrencyChanged(value: String) {
+        _uiState.update { it.copy(editedCurrencyCode = value, errorMessage = null) }
     }
 
     fun dismissGroupEditDialog() {
@@ -350,6 +405,12 @@ class GroupDetailsViewModel(
         val trimmedName = state.editedGroupName.trim()
         if (trimmedName.isBlank()) {
             _uiState.update { it.copy(errorMessage = "Group name is required") }
+            return
+        }
+
+        val trimmedCurrency = state.editedCurrencyCode.trim().uppercase()
+        if (trimmedCurrency.length != 3) {
+            _uiState.update { it.copy(errorMessage = "Please select a valid currency.") }
             return
         }
 
@@ -373,6 +434,7 @@ class GroupDetailsViewModel(
 
             val updatedGroup = currentGroup.copy(
                 name = trimmedName,
+                currency = trimmedCurrency,
                 imageUrl = uploadedImageUrl
             )
 
@@ -382,7 +444,8 @@ class GroupDetailsViewModel(
                         it.copy(
                             isUpdatingGroup = false,
                             isEditingGroup = false,
-                            editedGroupName = savedGroup.name
+                            editedGroupName = savedGroup.name,
+                            editedCurrencyCode = savedGroup.currency
                         )
                     }
                     onSuccess()

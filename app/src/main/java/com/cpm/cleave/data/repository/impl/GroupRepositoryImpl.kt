@@ -338,6 +338,7 @@ class GroupRepositoryImpl(
 
             val updatedGroup = remoteGroup.copy(
                 name = group.name.trim(),
+                currency = group.currency.trim().uppercase(Locale.ROOT),
                 imageUrl = group.imageUrl?.takeIf { it.isNotBlank() }
             )
 
