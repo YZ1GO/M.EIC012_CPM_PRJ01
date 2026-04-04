@@ -963,19 +963,6 @@ fun GroupDetailsScreen(
             Text("Add Expense", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         }
 
-        if (uiState.canDeleteGroup) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Button(
-                onClick = { showDeleteConfirmationDialog = true },
-                enabled = !uiState.isDeleting,
-                colors = ButtonDefaults.buttonColors(containerColor = colorScheme.errorContainer, contentColor = colorScheme.onErrorContainer),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth().height(52.dp)
-            ) {
-                Text(if (uiState.isDeleting) "Deleting..." else "Delete Group", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            }
-        }
-
         Spacer(modifier = Modifier.height(40.dp))
     }
 }
