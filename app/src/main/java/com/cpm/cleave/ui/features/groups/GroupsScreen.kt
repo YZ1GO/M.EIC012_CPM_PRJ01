@@ -38,12 +38,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Search
@@ -54,6 +56,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -418,13 +421,14 @@ fun GroupDetailsScreen(
         editSelectedImageBytes = bytes
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 16.dp),
-        horizontalAlignment = Alignment.Start
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.Start
+        ) {
         Spacer(modifier = Modifier.height(16.dp))
 
         val currentGroup = uiState.group
@@ -1067,19 +1071,27 @@ fun GroupDetailsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(40.dp))
-
-        // --- Action Buttons ---
-        Button(
-            onClick = { onAddExpenseClick(currentGroup.id, null) },
-            colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primary),
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth().height(52.dp)
-        ) {
-            Text("Add Expense", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(88.dp))
         }
 
-        Spacer(modifier = Modifier.height(40.dp))
+        val groupId = uiState.group?.id
+        if (!groupId.isNullOrBlank()) {
+            ExtendedFloatingActionButton(
+                onClick = { onAddExpenseClick(groupId, null) },
+                icon = {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = null
+                    )
+                },
+                text = { Text("Add Expense") },
+                containerColor = colorScheme.primary,
+                contentColor = colorScheme.onPrimary,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(20.dp)
+            )
+        }
     }
 }
 
@@ -1144,6 +1156,7 @@ private fun ExpenseDetailsItem(
     onLongPress: (() -> Unit)? = null,
     onViewReceipt: (String) -> Unit
 ) {
+    val isDebtPayment = expense.isDebtSettlementExpense()
     val desc = expense.description.ifBlank { "(No description)" }
     val payerText = expense.payerContributions
         .joinToString(separator = ", ") { payer ->
@@ -1194,6 +1207,30 @@ private fun ExpenseDetailsItem(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 18.sp
                 )
+                if (isDebtPayment) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Debt payment · Not editable",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
             }
             Spacer(modifier = Modifier.width(16.dp))
             Text(
