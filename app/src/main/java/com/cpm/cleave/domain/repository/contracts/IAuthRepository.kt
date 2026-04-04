@@ -8,6 +8,7 @@ interface IAuthRepository {
     suspend fun getCurrentUser(): Result<User?>
     suspend fun getUserDisplayName(userId: String): Result<String?>
     suspend fun getUserPhotoUrl(userId: String): Result<String?>
+    suspend fun getUserLastSeen(userId: String): Result<Long?>
     suspend fun getOrCreateAnonymousUser(defaultName: String = "Guest"): Result<User>
     suspend fun signUpWithEmail(
         name: String,

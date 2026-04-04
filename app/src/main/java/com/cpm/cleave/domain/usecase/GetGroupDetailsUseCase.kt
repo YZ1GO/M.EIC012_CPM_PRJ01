@@ -29,6 +29,7 @@ data class GroupDetailsData(
     val debtsWithReason: List<DebtWithReason>,
     val userDisplayNames: Map<String, String>,
     val userPhotoUrls: Map<String, String>,
+    val userLastSeen: Map<String, Long>,
     val currentUserId: String?
 )
 
@@ -72,6 +73,12 @@ class GetGroupDetailsUseCase(
             debts = debts,
             sharesByExpenseId = sharesByExpenseId
         )
+        val userLastSeen = resolveUserLastSeen(
+            group = group,
+            expenses = expenses,
+            debts = debts,
+            sharesByExpenseId = sharesByExpenseId
+        )
 
         return Result.success(
             GroupDetailsData(
@@ -81,6 +88,7 @@ class GetGroupDetailsUseCase(
                 debtsWithReason = debtsWithReason,
                 userDisplayNames = userDisplayNames,
                 userPhotoUrls = userPhotoUrls,
+                userLastSeen = userLastSeen,
                 currentUserId = currentUserId
             )
         )
@@ -123,6 +131,12 @@ class GetGroupDetailsUseCase(
                     debts = debts,
                     sharesByExpenseId = sharesByExpenseId
                 )
+                val userLastSeen = resolveUserLastSeen(
+                    group = group,
+                    expenses = observedExpenses,
+                    debts = debts,
+                    sharesByExpenseId = sharesByExpenseId
+                )
 
                 Result.success(
                     GroupDetailsData(
@@ -132,6 +146,7 @@ class GetGroupDetailsUseCase(
                         debtsWithReason = debtsWithReason,
                         userDisplayNames = userDisplayNames,
                         userPhotoUrls = userPhotoUrls,
+                        userLastSeen = userLastSeen,
                         currentUserId = currentUserId
                     )
                 )
@@ -214,10 +229,12 @@ class GetGroupDetailsUseCase(
 
         return ids.filter { it.isNotBlank() }
             .associateWith { userId ->
+                val normalizedUserId = normalizeUserId(userId)
                 when {
-                    currentUserId != null && userId == currentUserId -> "You"
+                    currentUserId != null && normalizedUserId == normalizeUserId(currentUserId) -> "You"
                     else -> authRepository.getUserDisplayName(userId).getOrNull()
-                        ?: "User ${userId.take(6)}"
+                        ?.takeIf { it.isNotBlank() }
+                        ?: fallbackDisplayName(normalizedUserId)
                 }
             }
     }
@@ -251,7 +268,50 @@ class GetGroupDetailsUseCase(
             .toMap()
     }
 
+    private suspend fun resolveUserLastSeen(
+        group: Group,
+        expenses: List<Expense>,
+        debts: List<Debt>,
+        sharesByExpenseId: Map<String, List<ExpenseShare>>
+    ): Map<String, Long> {
+        val ids = mutableSetOf<String>()
+        ids.addAll(group.members)
+        expenses.forEach { expense ->
+            ids.add(expense.paidByUserId)
+            expense.payerContributions.forEach { contribution -> ids.add(contribution.userId) }
+            sharesByExpenseId[expense.id].orEmpty().forEach { share -> ids.add(share.userId) }
+        }
+        debts.forEach { debt ->
+            ids.add(debt.fromUser)
+            ids.add(debt.toUser)
+        }
+
+        return ids
+            .filter { it.isNotBlank() }
+            .mapNotNull { userId ->
+                authRepository.getUserLastSeen(userId)
+                    .getOrNull()
+                    ?.let { lastSeen -> userId to lastSeen }
+            }
+            .toMap()
+    }
+
     private fun toCents(amount: Double): Long {
         return kotlin.math.round(amount * 100.0).toLong()
+    }
+
+    private fun normalizeUserId(rawUserId: String): String {
+        val trimmed = rawUserId.trim()
+        if (trimmed.isBlank()) return ""
+        return trimmed.substringAfterLast('/')
+    }
+
+    private fun fallbackDisplayName(normalizedUserId: String): String {
+        if (normalizedUserId.contains("guest", ignoreCase = true) ||
+            normalizedUserId.contains("anon", ignoreCase = true)
+        ) {
+            return "Guest"
+        }
+        return "User"
     }
 }

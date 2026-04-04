@@ -38,9 +38,13 @@ class AuthRepositoryImpl(
             val firebaseUser = firebaseAuth.currentUser
             if (firebaseUser != null) {
                 if (firebaseUser.isAnonymous) {
+                    val resolvedAnonymousName = resolveAnonymousDisplayName(
+                        userId = firebaseUser.uid,
+                        candidateName = firebaseUser.displayName ?: "Guest"
+                    )
                     val activatedAnonymous = authSessionStore.activateAnonymousUserSession(
                         anonymousUserId = firebaseUser.uid,
-                        anonymousName = firebaseUser.displayName ?: "Guest",
+                        anonymousName = resolvedAnonymousName,
                         anonymousPhotoUrl = firebaseUser.photoUrl?.toString()
                     )
                     ensureUserDocument(
@@ -74,28 +78,50 @@ class AuthRepositoryImpl(
 
     override suspend fun getUserDisplayName(userId: String): Result<String?> {
         return try {
-            if (userId.isBlank()) return Result.success(null)
+            val resolvedUserId = normalizeUserId(userId)
+            if (resolvedUserId.isBlank()) return Result.success(null)
 
-            val local = authSessionStore.getUserById(userId)
+            val local = authSessionStore.getUserById(resolvedUserId)
             
-            if (local != null && !local.isDeleted && local.name.isNotBlank() && local.name != userId) {
-                return Result.success(local.name)
+            if (local != null && !local.isDeleted && local.name.isNotBlank() && local.name != resolvedUserId) {
+                val localName = if (local.isAnonymous) {
+                    resolveAnonymousDisplayName(
+                        userId = resolvedUserId,
+                        candidateName = local.name
+                    )
+                } else {
+                    local.name
+                }
+                return Result.success(localName)
             }
 
-            val currentUid = firebaseAuth.currentUser?.uid
-            if (currentUid == null || currentUid != userId) {
-                return Result.success(null)
-            }
-
-            val remoteName = runCatching {
+            val remoteSnapshot = runCatching {
                 firestore.collection("users")
-                    .document(userId)
+                    .document(resolvedUserId)
                     .get()
                     .awaitTaskResult()
-                    .getString("name")
             }.getOrNull()
 
-            Result.success(remoteName?.takeIf { it.isNotBlank() })
+            val remoteName = remoteSnapshot
+                ?.getString("name")
+                ?.trim()
+                .orEmpty()
+
+            val isAnonymous = remoteSnapshot?.getBoolean("isAnonymous") == true
+
+            if (remoteName.isNotBlank()) {
+                val resolvedName = if (isAnonymous) {
+                    resolveAnonymousDisplayName(
+                        userId = resolvedUserId,
+                        candidateName = remoteName
+                    )
+                } else {
+                    remoteName
+                }
+                Result.success(resolvedName)
+            } else {
+                Result.success(if (isAnonymous) guestDisplayAlias(resolvedUserId) else null)
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -103,21 +129,17 @@ class AuthRepositoryImpl(
 
     override suspend fun getUserPhotoUrl(userId: String): Result<String?> {
         return try {
-            if (userId.isBlank()) return Result.success(null)
+            val resolvedUserId = normalizeUserId(userId)
+            if (resolvedUserId.isBlank()) return Result.success(null)
 
-            val local = authSessionStore.getUserById(userId)
+            val local = authSessionStore.getUserById(resolvedUserId)
             if (local != null && !local.isDeleted && !local.photoUrl.isNullOrBlank()) {
                 return Result.success(local.photoUrl)
             }
 
-            val currentUid = firebaseAuth.currentUser?.uid
-            if (currentUid == null || currentUid != userId) {
-                return Result.success(null)
-            }
-
             val remotePhotoUrl = runCatching {
                 firestore.collection("users")
-                    .document(userId)
+                    .document(resolvedUserId)
                     .get()
                     .awaitTaskResult()
                     .getString("photoUrl")
@@ -127,6 +149,45 @@ class AuthRepositoryImpl(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    override suspend fun getUserLastSeen(userId: String): Result<Long?> {
+        return try {
+            val resolvedUserId = normalizeUserId(userId)
+            if (resolvedUserId.isBlank()) return Result.success(null)
+
+            val remoteSnapshot = runCatching {
+                firestore.collection("users")
+                    .document(resolvedUserId)
+                    .get()
+                    .awaitTaskResult()
+            }.getOrNull()
+
+            val lastSeen = (remoteSnapshot?.get("lastSeen") as? Number)?.toLong()
+            Result.success(lastSeen)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun normalizeUserId(rawUserId: String): String {
+        val trimmed = rawUserId.trim()
+        if (trimmed.isBlank()) return ""
+        return trimmed.substringAfterLast('/')
+    }
+
+    private fun guestDisplayAlias(userId: String): String {
+        val normalizedUserId = normalizeUserId(userId)
+        val suffix = normalizedUserId.takeLast(4).uppercase().ifBlank { "USER" }
+        return "Guest-$suffix"
+    }
+
+    private fun resolveAnonymousDisplayName(userId: String, candidateName: String?): String {
+        val trimmed = candidateName?.trim().orEmpty()
+        if (trimmed.isBlank() || trimmed.equals("Guest", ignoreCase = true)) {
+            return guestDisplayAlias(userId)
+        }
+        return trimmed
     }
 
     override suspend fun getOrCreateAnonymousUser(defaultName: String): Result<User> {
@@ -143,8 +204,10 @@ class AuthRepositoryImpl(
                 .user
                 ?: return Result.failure(IllegalStateException("Could not create anonymous session."))
 
-
-            val resolvedName = (anonymousFirebaseUser.displayName ?: defaultName).ifBlank { "Guest" }
+            val resolvedName = resolveAnonymousDisplayName(
+                userId = anonymousFirebaseUser.uid,
+                candidateName = anonymousFirebaseUser.displayName ?: defaultName
+            )
             val anonymousUser = authSessionStore.activateAnonymousUserSession(
                 anonymousUserId = anonymousFirebaseUser.uid,
                 anonymousName = resolvedName,

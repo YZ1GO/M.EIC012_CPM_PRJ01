@@ -47,6 +47,7 @@ class GroupDetailsViewModel(
                         .onSuccess { data ->
                             _uiState.update {
                                 val preservedError = if (
+                                    it.selectedMemberForProfileId != null ||
                                     it.selectedMemberForExpulsionId != null ||
                                     it.selectedExpenseForDeletionId != null ||
                                     it.selectedDebtForPayment != null
@@ -64,6 +65,7 @@ class GroupDetailsViewModel(
                                     debtsWithReason = data.debtsWithReason,
                                     userDisplayNames = data.userDisplayNames,
                                     userPhotoUrls = data.userPhotoUrls,
+                                    userLastSeen = data.userLastSeen,
                                     canDeleteGroup = !data.group.ownerId.isNullOrBlank() && data.group.ownerId == data.currentUserId,
                                     errorMessage = preservedError
                                 )
@@ -89,6 +91,7 @@ class GroupDetailsViewModel(
                 .onSuccess { data ->
                     _uiState.update {
                         val preservedError = if (
+                            it.selectedMemberForProfileId != null ||
                             it.selectedMemberForExpulsionId != null ||
                             it.selectedExpenseForDeletionId != null ||
                             it.selectedDebtForPayment != null
@@ -106,6 +109,7 @@ class GroupDetailsViewModel(
                             debtsWithReason = data.debtsWithReason,
                             userDisplayNames = data.userDisplayNames,
                             userPhotoUrls = data.userPhotoUrls,
+                            userLastSeen = data.userLastSeen,
                             canDeleteGroup = !data.group.ownerId.isNullOrBlank() && data.group.ownerId == data.currentUserId,
                             errorMessage = preservedError
                         )
@@ -239,6 +243,21 @@ class GroupDetailsViewModel(
                 errorMessage = null
             )
         }
+    }
+
+    fun onMemberClicked(memberId: String) {
+        val state = _uiState.value
+        val currentUserId = state.currentUserId
+        if (memberId.isBlank()) return
+        if (!currentUserId.isNullOrBlank() && memberId == currentUserId) return
+
+        _uiState.update {
+            it.copy(selectedMemberForProfileId = memberId)
+        }
+    }
+
+    fun dismissMemberProfileDialog() {
+        _uiState.update { it.copy(selectedMemberForProfileId = null) }
     }
 
     fun onExpenseLongPressed(expenseId: String) {

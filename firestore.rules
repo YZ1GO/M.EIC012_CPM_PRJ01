@@ -84,7 +84,7 @@ service cloud.firestore {
                 request.resource.data.name.size() > 0 &&
                 request.resource.data.name.size() <= 100 &&
                 (!('email' in request.resource.data) || request.resource.data.email == null || request.resource.data.email is string) &&
-                (!('photoUrl' in request.resource.data) || request.resource.data.photoUrl == null || (request.resource.data.photoUrl is string && request.resource.data.photoUrl.size() <= 2000)) &&
+                (!('photoUrl' in request.resource.data) || request.resource.data.photoUrl == null || (request.resource.data.photoUrl is string && request.resource.data.photoUrl.size() <= 8000)) &&
                 request.auth.uid == userId;
         }
 
@@ -93,8 +93,8 @@ service cloud.firestore {
         }
 
         match /users/{userId} {
-            // users may read and write only their own document
-            allow read: if signedIn() && request.auth.uid == userId;
+            // Any signed-in user can read display metadata needed for member names/photos.
+            allow read: if signedIn();
             allow create, update: if signedIn() && request.auth.uid == userId && validUserPayload(userId);
             allow delete: if false;
         }

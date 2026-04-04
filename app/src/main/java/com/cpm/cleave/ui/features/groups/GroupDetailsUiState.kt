@@ -14,6 +14,8 @@ data class GroupDetailsUiState(
     val debtsWithReason: List<DebtWithReason> = emptyList(),
     val userDisplayNames: Map<String, String> = emptyMap(),
     val userPhotoUrls: Map<String, String> = emptyMap(),
+    val userLastSeen: Map<String, Long> = emptyMap(),
+    val selectedMemberForProfileId: String? = null,
     val selectedDebtForPayment: Debt? = null,
     val debtPaymentAmountInput: String = "",
     val isSettlingDebt: Boolean = false,
