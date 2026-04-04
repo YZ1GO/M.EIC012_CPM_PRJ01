@@ -8,33 +8,49 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -43,35 +59,40 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.rememberScrollState
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import com.cpm.cleave.ui.features.common.CameraPermissionPrompt
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import androidx.core.content.FileProvider
-import com.cpm.cleave.ui.features.common.CameraPermissionPrompt
+import java.util.Locale
 
 @Composable
 fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val scrollState = rememberScrollState()
-    val titleTopSpacing = 24.dp
-    val titleBottomSpacing = 32.dp
-    val sectionSpacing = 16.dp
     val colorScheme = MaterialTheme.colorScheme
+
     var receiptBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var currentReceiptUri by remember { mutableStateOf<Uri?>(null) }
     var pendingReceiptCapture by remember { mutableStateOf(false) }
     var cameraPermissionDeniedMessage by remember { mutableStateOf<String?>(null) }
+
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
@@ -81,6 +102,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
         receiptBitmap = prepared?.first
         viewModel.onReceiptImageSelected(prepared?.second)
     }
+
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -120,6 +142,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
         uiState.memberDisplayNames[memberId] ?: memberId
     }
 
+    val totalExpenseAmount = uiState.amountInput.toDoubleOrNull() ?: 0.0
     val contributionTotal = uiState.selectedPayerIds.sumOf { payerId ->
         uiState.payerAmountInputs[payerId]?.toDoubleOrNull() ?: 0.0
     }
@@ -127,440 +150,513 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .imePadding()
             .verticalScroll(scrollState)
             .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.Start
     ) {
-        Spacer(modifier = Modifier.height(titleTopSpacing))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // --- Header ---
         Text(
             text = if (uiState.isEditing) "Edit Expense" else "Add Expense",
-            fontSize = 24.sp,
-            fontWeight = FontWeight.SemiBold
+            color = colorScheme.primary,
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold
         )
 
-        Spacer(modifier = Modifier.height(titleBottomSpacing))
+        Spacer(modifier = Modifier.height(32.dp))
 
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(colorScheme.surfaceVariant.copy(alpha = 0.24f), RoundedCornerShape(16.dp))
-                .border(1.dp, colorScheme.outlineVariant.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
-                .padding(12.dp)
+        // --- Description Field ---
+        Text("Description", fontSize = 14.sp, color = colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
+        OutlinedTextField(
+            value = uiState.description,
+            onValueChange = { viewModel.onDescriptionChanged(it) },
+            placeholder = { Text("Dinner, groceries, fuel...", color = colorScheme.onSurface.copy(alpha = 0.3f)) },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                unfocusedBorderColor = colorScheme.outlineVariant,
+                focusedBorderColor = colorScheme.primary
+            ),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // --- Amount Field ---
+        Text("Amount", fontSize = 14.sp, color = colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
+        OutlinedTextField(
+            value = uiState.amountInput,
+            onValueChange = { viewModel.onAmountChanged(it) },
+            placeholder = { Text("0.00", color = colorScheme.onSurface.copy(alpha = 0.3f)) },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                unfocusedBorderColor = colorScheme.outlineVariant,
+                focusedBorderColor = colorScheme.primary
+            ),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next)
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // --- Receipt Scanner Card ---
+        Surface(
+            color = colorScheme.surfaceVariant.copy(alpha = 0.3f),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Amount", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            TextField(
-                value = uiState.amountInput,
-                onValueChange = { viewModel.onAmountChanged(it) },
-                placeholder = { Text("0.00") },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
-                    unfocusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
-                    disabledContainerColor = colorScheme.surface.copy(alpha = 0.35f),
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    disabledIndicatorColor = Color.Transparent
-                ),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(sectionSpacing))
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(colorScheme.surfaceVariant.copy(alpha = 0.24f), RoundedCornerShape(16.dp))
-                .border(1.dp, colorScheme.outlineVariant.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
-                .padding(12.dp)
-        ) {
-            Text("Receipt (optional)", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Button(
-                onClick = {
-                    val hasCameraPermission = ContextCompat.checkSelfPermission(
-                        context,
-                        Manifest.permission.CAMERA
-                    ) == PackageManager.PERMISSION_GRANTED
-
-                    if (!hasCameraPermission) {
-                        pendingReceiptCapture = true
-                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                        return@Button
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Receipt Scanner", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = colorScheme.onSurface)
+                    if (receiptBitmap != null) {
+                        TextButton(
+                            onClick = { receiptBitmap = null; viewModel.onReceiptImageSelected(null) },
+                            contentPadding = PaddingValues(0.dp),
+                            modifier = Modifier.height(24.dp)
+                        ) {
+                            Text("Clear", fontSize = 13.sp, color = colorScheme.error)
+                        }
                     }
+                }
+                
+                Spacer(modifier = Modifier.height(12.dp))
 
-                    val imageUri = createReceiptImageUri(context) ?: run {
-                        viewModel.setErrorMessage("Could not prepare a receipt image file")
-                        return@Button
+                if (receiptBitmap != null) {
+                    Image(
+                        bitmap = receiptBitmap!!.asImageBitmap(),
+                        contentDescription = "Receipt preview",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(140.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .border(1.dp, colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                            .clickable {
+                                val imageUri = createReceiptImageUri(context)
+                                if (imageUri != null) {
+                                    currentReceiptUri = imageUri
+                                    cameraLauncher.launch(imageUri)
+                                }
+                            }
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { viewModel.extractTotalFromReceipt() },
+                            enabled = !uiState.isExtractingTotal,
+                            colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primaryContainer, contentColor = colorScheme.onPrimaryContainer),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f).height(40.dp)
+                        ) {
+                            Text(if (uiState.isExtractingTotal) "Reading..." else "Get Total", fontSize = 13.sp)
+                        }
+                        Button(
+                            onClick = { viewModel.extractItemsFromReceipt() },
+                            enabled = !uiState.isExtractingItems,
+                            colors = ButtonDefaults.buttonColors(containerColor = colorScheme.secondaryContainer, contentColor = colorScheme.onSecondaryContainer),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f).height(40.dp)
+                        ) {
+                            Text(if (uiState.isExtractingItems) "Reading..." else "Get Items", fontSize = 13.sp)
+                        }
                     }
-
-                    currentReceiptUri = imageUri
-                    runCatching {
-                        cameraLauncher.launch(imageUri)
-                    }.onFailure {
-                        viewModel.setErrorMessage("Could not open the camera")
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = colorScheme.secondaryContainer),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.CameraAlt,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.size(8.dp))
-                Text(if (receiptBitmap == null) "Capture receipt" else "Retake receipt")
-            }
-
-            if (receiptBitmap != null) {
-                Spacer(modifier = Modifier.height(10.dp))
-                Image(
-                    bitmap = receiptBitmap!!.asImageBitmap(),
-                    contentDescription = "Receipt preview",
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(180.dp)
-                        .border(1.dp, colorScheme.outlineVariant, RoundedCornerShape(10.dp))
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                } else {
                     Button(
-                        onClick = { viewModel.extractTotalFromReceipt() },
-                        enabled = !uiState.isExtractingTotal,
+                        onClick = {
+                            val hasCameraPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+                            if (!hasCameraPermission) {
+                                pendingReceiptCapture = true
+                                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                return@Button
+                            }
+                            val imageUri = createReceiptImageUri(context) ?: run {
+                                viewModel.setErrorMessage("Could not prepare a receipt image file")
+                                return@Button
+                            }
+                            currentReceiptUri = imageUri
+                            runCatching { cameraLauncher.launch(imageUri) }
+                                .onFailure { viewModel.setErrorMessage("Could not open the camera") }
+                        },
                         colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primary),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.weight(1f)
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
                     ) {
-                        Text(if (uiState.isExtractingTotal) "Reading total..." else "Extract total")
-                    }
-
-                    Button(
-                        onClick = { viewModel.extractItemsFromReceipt() },
-                        enabled = !uiState.isExtractingItems,
-                        colors = ButtonDefaults.buttonColors(containerColor = colorScheme.secondary),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(if (uiState.isExtractingItems) "Reading items..." else "Extract items")
+                        Icon(imageVector = Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.size(8.dp))
+                        Text("Capture Receipt")
                     }
                 }
 
+                // Receipt Items List
                 if (uiState.detectedReceiptItems.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text("Receipt items", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Detected Items", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     uiState.detectedReceiptItems.forEachIndexed { index, item ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            TextField(
-                                value = String.format(java.util.Locale.US, "%.3f", (item.quantity ?: 1.0)).trimEnd('0').trimEnd('.'),
+                            OutlinedTextField(
+                                value = String.format(Locale.US, "%.3f", (item.quantity ?: 1.0)).trimEnd('0').trimEnd('.'),
                                 onValueChange = { value -> viewModel.onReceiptItemQuantityChanged(index, value) },
-                                placeholder = { Text("Qty") },
-                                modifier = Modifier.weight(0.55f),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = TextFieldDefaults.colors(
-                                    focusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
-                                    unfocusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
-                                    disabledContainerColor = colorScheme.surface.copy(alpha = 0.35f),
-                                    focusedIndicatorColor = Color.Transparent,
-                                    unfocusedIndicatorColor = Color.Transparent,
-                                    disabledIndicatorColor = Color.Transparent
-                                ),
-                                singleLine = true
+                                modifier = Modifier.weight(0.5f),
+                                shape = RoundedCornerShape(8.dp),
+                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                             )
-                            TextField(
+                            OutlinedTextField(
                                 value = item.name,
                                 onValueChange = { value -> viewModel.onReceiptItemNameChanged(index, value) },
-                                placeholder = { Text("Item") },
-                                modifier = Modifier.weight(1.1f),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = TextFieldDefaults.colors(
-                                    focusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
-                                    unfocusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
-                                    disabledContainerColor = colorScheme.surface.copy(alpha = 0.35f),
-                                    focusedIndicatorColor = Color.Transparent,
-                                    unfocusedIndicatorColor = Color.Transparent,
-                                    disabledIndicatorColor = Color.Transparent
-                                ),
+                                modifier = Modifier.weight(1.2f),
+                                shape = RoundedCornerShape(8.dp),
+                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
                                 singleLine = true
                             )
-                            TextField(
-                                value = if (item.amount == 0.0) "" else String.format(java.util.Locale.US, "%.2f", item.amount),
+                            OutlinedTextField(
+                                value = if (item.amount == 0.0) "" else String.format(Locale.US, "%.2f", item.amount),
                                 onValueChange = { value -> viewModel.onReceiptItemAmountChanged(index, value) },
-                                placeholder = { Text("Subtotal") },
-                                modifier = Modifier.weight(0.75f),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = TextFieldDefaults.colors(
-                                    focusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
-                                    unfocusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
-                                    disabledContainerColor = colorScheme.surface.copy(alpha = 0.35f),
-                                    focusedIndicatorColor = Color.Transparent,
-                                    unfocusedIndicatorColor = Color.Transparent,
-                                    disabledIndicatorColor = Color.Transparent
-                                ),
-                                singleLine = true
+                                modifier = Modifier.weight(0.7f),
+                                shape = RoundedCornerShape(8.dp),
+                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                             )
-                            IconButton(onClick = { viewModel.removeReceiptItem(index) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Remove item")
+                            IconButton(
+                                onClick = { viewModel.removeReceiptItem(index) },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = "Remove", tint = colorScheme.error, modifier = Modifier.size(18.dp))
                             }
                         }
                         if (index < uiState.detectedReceiptItems.lastIndex) {
-                            Spacer(modifier = Modifier.height(6.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { viewModel.addReceiptItem() },
+                            colors = ButtonDefaults.buttonColors(containerColor = colorScheme.secondaryContainer, contentColor = colorScheme.onSecondaryContainer),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f).height(36.dp)
+                        ) {
+                            Text("Add Row", fontSize = 12.sp)
+                        }
+                        Button(
+                            onClick = { viewModel.fillDescriptionFromReceiptItems() },
+                            enabled = uiState.detectedReceiptItems.isNotEmpty(),
+                            colors = ButtonDefaults.buttonColors(containerColor = colorScheme.tertiaryContainer, contentColor = colorScheme.onTertiaryContainer),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f).height(36.dp)
+                        ) {
+                            Text("Use in description", fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = { viewModel.addReceiptItem() },
-                        colors = ButtonDefaults.buttonColors(containerColor = colorScheme.secondaryContainer),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Add item")
-                    }
-                    Button(
-                        onClick = { viewModel.fillDescriptionFromReceiptItems() },
-                        enabled = uiState.detectedReceiptItems.isNotEmpty(),
-                        colors = ButtonDefaults.buttonColors(containerColor = colorScheme.tertiaryContainer),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Use in description")
-                    }
+                uiState.receiptMessage?.let {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(text = it, color = colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 }
-            }
-
-            uiState.receiptMessage?.let {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(text = it, color = colorScheme.onSurfaceVariant, fontSize = 12.sp)
             }
         }
 
-        Spacer(modifier = Modifier.height(sectionSpacing))
+        Spacer(modifier = Modifier.height(32.dp))
 
-        Column(
+        // --- Payer Logic ---
+        Text("Who Paid?", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = colorScheme.onSurface)
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        // Segmented Toggle
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(colorScheme.surfaceVariant.copy(alpha = 0.24f), RoundedCornerShape(16.dp))
-                .border(1.dp, colorScheme.outlineVariant.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
-                .padding(12.dp)
+                .background(colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                .padding(4.dp)
         ) {
-            Text("Description", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            TextField(
-                value = uiState.description,
-                onValueChange = { viewModel.onDescriptionChanged(it) },
-                placeholder = { Text("Dinner, groceries, fuel...") },
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (uiState.buyerMode == BuyerMode.SINGLE_BUYER) colorScheme.surface else Color.Transparent)
+                    .clickable { viewModel.onBuyerModeChanged(BuyerMode.SINGLE_BUYER) }
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "Single Payer", 
+                    fontSize = 14.sp, 
+                    fontWeight = if (uiState.buyerMode == BuyerMode.SINGLE_BUYER) FontWeight.Bold else FontWeight.Medium,
+                    color = if (uiState.buyerMode == BuyerMode.SINGLE_BUYER) colorScheme.primary else colorScheme.onSurfaceVariant
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (uiState.buyerMode == BuyerMode.SELECT_BUYERS) colorScheme.surface else Color.Transparent)
+                    .clickable {
+                        viewModel.onBuyerModeChanged(BuyerMode.SELECT_BUYERS)
+                        if (uiState.selectedPayerIds.isEmpty() && totalExpenseAmount > 0) {
+                            val splitAmount = totalExpenseAmount / uiState.availablePayers.size
+                            val formattedSplit = String.format(Locale.US, "%.2f", splitAmount)
+                            uiState.availablePayers.forEach { p ->
+                                viewModel.onPayerToggled(p, true)
+                                viewModel.onPayerAmountChanged(p, formattedSplit)
+                            }
+                        }
+                    }
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "Multiple Payers", 
+                    fontSize = 14.sp, 
+                    fontWeight = if (uiState.buyerMode == BuyerMode.SELECT_BUYERS) FontWeight.Bold else FontWeight.Medium,
+                    color = if (uiState.buyerMode == BuyerMode.SELECT_BUYERS) colorScheme.primary else colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (uiState.buyerMode == BuyerMode.SINGLE_BUYER) {
+            Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
-                    unfocusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
-                    disabledContainerColor = colorScheme.surface.copy(alpha = 0.35f),
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    disabledIndicatorColor = Color.Transparent
-                ),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(sectionSpacing))
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(colorScheme.surfaceVariant.copy(alpha = 0.24f), RoundedCornerShape(16.dp))
-                .border(1.dp, colorScheme.outlineVariant.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
-                .padding(12.dp)
-        ) {
-            Text("Who paid and how much?", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { viewModel.onBuyerModeChanged(BuyerMode.SINGLE_BUYER) },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (uiState.buyerMode == BuyerMode.SINGLE_BUYER) colorScheme.primary else colorScheme.secondaryContainer
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("You paid")
-                }
-
-                Button(
-                    onClick = { viewModel.onBuyerModeChanged(BuyerMode.SELECT_BUYERS) },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (uiState.buyerMode == BuyerMode.SELECT_BUYERS) colorScheme.primary else colorScheme.secondaryContainer
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("Multiple payers")
-                }
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            if (uiState.buyerMode == BuyerMode.SINGLE_BUYER) {
+                color = colorScheme.primaryContainer.copy(alpha = 0.5f)
+            ) {
                 Text(
-                    text = "Buyer: ${uiState.primaryBuyerId.takeIf { it.isNotBlank() }?.let(labelForMember) ?: "(unknown)"} pays full amount",
-                    color = colorScheme.onSurfaceVariant,
-                    fontSize = 12.sp
+                    text = "You pay the full amount",
+                    color = colorScheme.onPrimaryContainer,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(16.dp)
                 )
-            } else {
-                uiState.availablePayers.forEachIndexed { index, payer ->
-                    val selected = uiState.selectedPayerIds.contains(payer)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Checkbox(
-                            checked = selected,
-                            onCheckedChange = { checked ->
-                                viewModel.onPayerToggled(payer, checked)
+            }
+        } else {
+            uiState.availablePayers.forEachIndexed { index, payer ->
+                val selected = uiState.selectedPayerIds.contains(payer)
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(
+                        checked = selected,
+                        onCheckedChange = { checked -> 
+                            viewModel.onPayerToggled(payer, checked) 
+                            
+                            val newSelectedPayers = if (checked) uiState.selectedPayerIds + payer else uiState.selectedPayerIds - payer
+                            if (newSelectedPayers.isNotEmpty() && totalExpenseAmount > 0) {
+                                val splitAmount = totalExpenseAmount / newSelectedPayers.size
+                                val formattedSplit = String.format(Locale.US, "%.2f", splitAmount)
+                                newSelectedPayers.forEach { pId ->
+                                    viewModel.onPayerAmountChanged(pId, formattedSplit)
+                                }
                             }
-                        )
-                        Text(
-                            text = labelForMember(payer),
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextField(
-                            value = uiState.payerAmountInputs[payer].orEmpty(),
-                            onValueChange = { value ->
-                                if (selected) {
-                                    viewModel.onPayerAmountChanged(payer, value)
+                        }
+                    )
+                    Text(
+                        text = labelForMember(payer),
+                        modifier = Modifier.weight(1f),
+                        fontSize = 15.sp
+                    )
+                    OutlinedTextField(
+                        value = uiState.payerAmountInputs[payer].orEmpty(),
+                        onValueChange = { value -> 
+                            if (selected) {
+                                viewModel.onPayerAmountChanged(payer, value)
+                                
+                                val newAmount = value.toDoubleOrNull() ?: 0.0
+                                val otherPayers = uiState.selectedPayerIds - payer
+                                
+                                if (otherPayers.isNotEmpty()) {
+                                    val remainder = maxOf(0.0, totalExpenseAmount - newAmount)
+                                    val splitAmount = remainder / otherPayers.size
+                                    val formattedSplit = String.format(Locale.US, "%.2f", splitAmount)
+                                    
+                                    otherPayers.forEach { pId ->
+                                        viewModel.onPayerAmountChanged(pId, formattedSplit)
+                                    }
+                                }
+                            } 
+                        },
+                        enabled = selected,
+                        placeholder = { Text("0.00") },
+                        modifier = Modifier
+                            .weight(0.7f)
+                            .onFocusChanged { focusState ->
+                                if (!focusState.isFocused) {
+                                    val currentVal = uiState.payerAmountInputs[payer].orEmpty()
+                                    val asDouble = currentVal.toDoubleOrNull()
+                                    if (asDouble != null) {
+                                        viewModel.onPayerAmountChanged(payer, String.format(Locale.US, "%.2f", asDouble))
+                                    }
                                 }
                             },
-                            enabled = selected,
-                            placeholder = { Text("0.00") },
-                            modifier = Modifier.weight(0.8f),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
-                                unfocusedContainerColor = colorScheme.surface.copy(alpha = 0.55f),
-                                disabledContainerColor = colorScheme.surface.copy(alpha = 0.35f),
-                                focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent,
-                                disabledIndicatorColor = Color.Transparent
-                            ),
-                            singleLine = true
+                        shape = RoundedCornerShape(10.dp),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            unfocusedBorderColor = colorScheme.outlineVariant,
+                            focusedBorderColor = colorScheme.primary
                         )
-                    }
-
-                    if (index < uiState.availablePayers.lastIndex) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                    }
+                    )
                 }
-
-                Spacer(modifier = Modifier.height(6.dp))
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                val formattedContribution = String.format(Locale.US, "%.2f", contributionTotal)
+                val formattedTotal = String.format(Locale.US, "%.2f", totalExpenseAmount)
+                
                 Text(
-                    text = "Contributions: $contributionTotal / ${uiState.amountInput.ifBlank { "0.0" }}",
-                    color = colorScheme.onSurfaceVariant,
-                    fontSize = 12.sp
+                    text = "Total input: $formattedContribution / $formattedTotal",
+                    color = if (contributionTotal > totalExpenseAmount + 0.01) colorScheme.error else colorScheme.onSurfaceVariant,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(sectionSpacing))
+        Spacer(modifier = Modifier.height(32.dp))
 
-        Column(
+        // --- Split Logic ---
+        Text("How to Split?", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = colorScheme.onSurface)
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(colorScheme.surfaceVariant.copy(alpha = 0.24f), RoundedCornerShape(16.dp))
-                .border(1.dp, colorScheme.outlineVariant.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
-                .padding(12.dp)
+                .background(colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                .padding(4.dp)
         ) {
-            Text("How to split?", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { viewModel.onSplitModeChanged(SplitMode.ALL_MEMBERS) },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (uiState.splitMode == SplitMode.ALL_MEMBERS) colorScheme.primary else colorScheme.secondaryContainer
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("All members")
-                }
-
-                Button(
-                    onClick = { viewModel.onSplitModeChanged(SplitMode.SELECTED_MEMBERS) },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (uiState.splitMode == SplitMode.SELECTED_MEMBERS) colorScheme.primary else colorScheme.secondaryContainer
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("Selected members")
-                }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (uiState.splitMode == SplitMode.ALL_MEMBERS) colorScheme.surface else Color.Transparent)
+                    .clickable { viewModel.onSplitModeChanged(SplitMode.ALL_MEMBERS) }
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "All Members", 
+                    fontSize = 14.sp, 
+                    fontWeight = if (uiState.splitMode == SplitMode.ALL_MEMBERS) FontWeight.Bold else FontWeight.Medium,
+                    color = if (uiState.splitMode == SplitMode.ALL_MEMBERS) colorScheme.primary else colorScheme.onSurfaceVariant
+                )
             }
-
-            if (uiState.splitMode == SplitMode.SELECTED_MEMBERS) {
-                Spacer(modifier = Modifier.height(6.dp))
-                uiState.availablePayers.forEach { memberId ->
-                    val isPayer = if (uiState.buyerMode == BuyerMode.SINGLE_BUYER) {
-                        uiState.primaryBuyerId == memberId
-                    } else {
-                        uiState.selectedPayerIds.contains(memberId)
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Checkbox(
-                            checked = uiState.selectedSplitMemberIds.contains(memberId),
-                            enabled = !isPayer,
-                            onCheckedChange = { checked ->
-                                viewModel.onSplitMemberToggled(memberId, checked)
-                            }
-                        )
-                        Text(
-                            text = if (isPayer) "${labelForMember(memberId)} (payer, required)" else labelForMember(memberId),
-                            color = colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (uiState.splitMode == SplitMode.SELECTED_MEMBERS) colorScheme.surface else Color.Transparent)
+                    .clickable { viewModel.onSplitModeChanged(SplitMode.SELECTED_MEMBERS) }
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "Custom Split", 
+                    fontSize = 14.sp, 
+                    fontWeight = if (uiState.splitMode == SplitMode.SELECTED_MEMBERS) FontWeight.Bold else FontWeight.Medium,
+                    color = if (uiState.splitMode == SplitMode.SELECTED_MEMBERS) colorScheme.primary else colorScheme.onSurfaceVariant
+                )
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
-
-        uiState.errorMessage?.let {
-            Text(text = it, color = colorScheme.error, fontSize = 14.sp)
+        if (uiState.splitMode == SplitMode.SELECTED_MEMBERS) {
             Spacer(modifier = Modifier.height(12.dp))
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = colorScheme.surfaceVariant.copy(alpha = 0.2f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, colorScheme.outlineVariant.copy(alpha = 0.5f))
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    uiState.availablePayers.forEach { memberId ->
+                        val isPayer = if (uiState.buyerMode == BuyerMode.SINGLE_BUYER) {
+                            uiState.primaryBuyerId == memberId
+                        } else {
+                            uiState.selectedPayerIds.contains(memberId)
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = uiState.selectedSplitMemberIds.contains(memberId),
+                                enabled = !isPayer,
+                                onCheckedChange = { checked -> viewModel.onSplitMemberToggled(memberId, checked) }
+                            )
+                            Text(
+                                text = if (isPayer) "${labelForMember(memberId)} (Payer)" else labelForMember(memberId),
+                                color = if (isPayer) colorScheme.primary else colorScheme.onSurface,
+                                fontSize = 15.sp,
+                                fontWeight = if (isPayer) FontWeight.SemiBold else FontWeight.Normal
+                            )
+                        }
+                    }
+                }
+            }
         }
 
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // --- Error Pill ---
+        AnimatedVisibility(
+            visible = uiState.errorMessage != null,
+            enter = expandVertically(animationSpec = tween(300, easing = FastOutSlowInEasing)) + fadeIn(animationSpec = tween(300)),
+            exit = shrinkVertically(animationSpec = tween(300, easing = FastOutSlowInEasing)) + fadeOut(animationSpec = tween(300))
+        ) {
+            uiState.errorMessage?.let { message ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp)
+                        .background(colorScheme.error.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.ErrorOutline, contentDescription = "Error", tint = colorScheme.error, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(text = message, color = colorScheme.error, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+        }
+
+        // --- Save Action ---
         Button(
             onClick = { viewModel.submitExpense(onSuccess = onNavigateBack) },
             colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primary),
-            shape = RoundedCornerShape(8.dp),
+            shape = RoundedCornerShape(12.dp),
             enabled = !uiState.isLoading,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
+            modifier = Modifier.fillMaxWidth().height(52.dp)
         ) {
             val actionText = if (uiState.isEditing) "Save Changes" else "Create Expense"
             val loadingText = if (uiState.isEditing) "Saving..." else "Creating..."
-            Text(if (uiState.isLoading) loadingText else actionText)
+            Text(
+                text = if (uiState.isLoading) loadingText else actionText,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold
+            )
         }
+        
+        Spacer(modifier = Modifier.height(24.dp))
     }
 }
 
@@ -591,7 +687,6 @@ private fun uriToFile(context: Context, uri: Uri): File? {
     return if (uri.scheme == "file") {
         uri.path?.let { File(it) }
     } else {
-        // FileProvider content uri backed by our own cache file.
         val temp = File(context.cacheDir, "receipt_copy_${System.currentTimeMillis()}.jpg")
         context.contentResolver.openInputStream(uri)?.use { input ->
             FileOutputStream(temp).use { output -> input.copyTo(output) }
