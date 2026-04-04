@@ -487,14 +487,12 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                 color = colorScheme.primaryContainer.copy(alpha = 0.5f)
             ) {
                 Text(
-                    text = if (uiState.primaryBuyerId.isBlank()) {
-                        "A single payer covers the full amount"
+                    text = if (!uiState.isEditing) {
+                        "You pay the full amount"
+                    } else if (uiState.primaryBuyerId.isBlank() || primaryPayerLabel.equals("You", ignoreCase = true)) {
+                        "You pay the full amount"
                     } else {
-                        if (primaryPayerLabel.equals("You", ignoreCase = true)) {
-                            "You pay the full amount"
-                        } else {
-                            "$primaryPayerLabel pays the full amount"
-                        }
+                        "$primaryPayerLabel pays the full amount"
                     },
                     color = colorScheme.onPrimaryContainer,
                     fontSize = 14.sp,
