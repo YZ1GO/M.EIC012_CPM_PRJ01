@@ -14,6 +14,7 @@ class RequestUpdateExpenseUseCase(
         splitMemberIds: List<String>,
         payerContributions: Map<String, Double>,
         receiptImageBytes: ByteArray? = null,
+        removeReceiptImage: Boolean = false,
         receiptItems: List<ReceiptItem> = emptyList()
     ): Result<Unit> {
         return expenseRepository.updateExpense(
@@ -24,6 +25,7 @@ class RequestUpdateExpenseUseCase(
             splitMemberIds = splitMemberIds,
             payerContributions = payerContributions,
             receiptImageBytes = receiptImageBytes,
+            removeReceiptImage = removeReceiptImage,
             receiptItems = receiptItems
         )
     }

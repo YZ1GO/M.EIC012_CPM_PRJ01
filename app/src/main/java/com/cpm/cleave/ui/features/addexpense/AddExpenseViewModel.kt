@@ -40,6 +40,7 @@ class AddExpenseViewModel(
     )
     val uiState: StateFlow<AddExpenseUiState> = _uiState.asStateFlow()
     private var receiptImageBytes: ByteArray? = null
+    private var removeExistingReceiptImage: Boolean = false
 
     init {
         if (!editingExpenseId.isNullOrBlank()) {
@@ -223,6 +224,7 @@ class AddExpenseViewModel(
     }
 
     private fun applyExpenseDraft(expense: Expense, splitMemberIds: Set<String>) {
+        removeExistingReceiptImage = false
         val canEditExpense = !expense.isDebtSettlementExpense()
         val contributions = expense.payerContributions.filter { contribution -> contribution.amount > 0.0 }
         val selectedPayers = if (contributions.isNotEmpty()) {
@@ -259,8 +261,9 @@ class AddExpenseViewModel(
                 splitMode = if (splitSelection.isEmpty()) SplitMode.ALL_MEMBERS else SplitMode.SELECTED_MEMBERS,
                 selectedSplitMemberIds = splitSelection,
                 hasReceiptImage = !expense.imagePath.isNullOrBlank(),
+                receiptImagePath = expense.imagePath,
                 detectedReceiptItems = expense.receiptItems,
-                receiptMessage = if (canEditExpense) "Editing existing expense" else "Debt payment expenses can't be edited",
+                receiptMessage = if (canEditExpense) null else "Debt payment expenses can't be edited",
                 canEditExpense = canEditExpense,
                 errorMessage = if (canEditExpense) null else "Debt payment expenses can't be edited"
             )
@@ -335,13 +338,23 @@ class AddExpenseViewModel(
     fun onReceiptImageSelected(imageBytes: ByteArray?) {
         if (!isExpenseEditable()) return
         receiptImageBytes = imageBytes
+        removeExistingReceiptImage = imageBytes == null && _uiState.value.isEditing
         _uiState.update {
             it.copy(
                 hasReceiptImage = imageBytes != null,
+                receiptImagePath = null,
                 detectedReceiptItems = emptyList(),
                 receiptMessage = if (imageBytes != null) "Receipt attached" else null,
                 errorMessage = null
             )
+        }
+    }
+
+    fun preloadExistingReceiptImage(imageBytes: ByteArray) {
+        receiptImageBytes = imageBytes
+        removeExistingReceiptImage = false
+        _uiState.update {
+            if (it.hasReceiptImage) it else it.copy(hasReceiptImage = true)
         }
     }
 
@@ -705,6 +718,7 @@ class AddExpenseViewModel(
                     splitMemberIds = splitMemberIds,
                     payerContributions = payerContributions,
                     receiptImageBytes = receiptImageBytes,
+                    removeReceiptImage = removeExistingReceiptImage,
                     receiptItems = normalizedReceiptItems
                 )
             } else {

@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -33,16 +35,23 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Rotate90DegreesCw
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.CircularProgressIndicator
@@ -52,7 +61,10 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -80,6 +92,9 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.net.URL
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.Locale
 
 @Composable
@@ -94,6 +109,8 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
     var currentReceiptUri by remember { mutableStateOf<Uri?>(null) }
     var pendingReceiptCapture by remember { mutableStateOf(false) }
     var cameraPermissionDeniedMessage by remember { mutableStateOf<String?>(null) }
+    var showReceiptPreview by remember { mutableStateOf(false) }
+    var lastPreloadedReceiptPath by remember { mutableStateOf<String?>(null) }
 
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
@@ -132,6 +149,23 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
         }
     }
 
+    val launchReceiptCapture: () -> Unit = {
+        val hasCameraPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        if (!hasCameraPermission) {
+            pendingReceiptCapture = true
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        } else {
+            val imageUri = createReceiptImageUri(context)
+            if (imageUri == null) {
+                viewModel.setErrorMessage("Could not prepare a receipt image file")
+            } else {
+                currentReceiptUri = imageUri
+                runCatching { cameraLauncher.launch(imageUri) }
+                    .onFailure { viewModel.setErrorMessage("Could not open the camera") }
+            }
+        }
+    }
+
     cameraPermissionDeniedMessage?.let { message ->
         CameraPermissionPrompt(
             message = message,
@@ -142,6 +176,26 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
 
     val labelForMember: (String) -> String = { memberId ->
         uiState.memberDisplayNames[memberId] ?: memberId
+    }
+
+    LaunchedEffect(uiState.editingExpenseId, uiState.receiptImagePath, uiState.hasReceiptImage) {
+        val path = uiState.receiptImagePath
+        if (
+            uiState.isEditing &&
+            uiState.hasReceiptImage &&
+            receiptBitmap == null &&
+            !path.isNullOrBlank() &&
+            path != lastPreloadedReceiptPath
+        ) {
+            lastPreloadedReceiptPath = path
+            val prepared = withContext(Dispatchers.IO) {
+                loadPreparedReceiptFromPath(context, path)
+            }
+            if (prepared != null) {
+                receiptBitmap = prepared.first
+                viewModel.preloadExistingReceiptImage(prepared.second)
+            }
+        }
     }
 
     val totalExpenseAmount = uiState.amountInput.toDoubleOrNull() ?: 0.0
@@ -235,189 +289,230 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // --- Receipt Scanner Card ---
-        Surface(
-            color = colorScheme.surfaceVariant.copy(alpha = 0.3f),
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Receipt Scanner", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = colorScheme.onSurface)
-                    if (receiptBitmap != null) {
-                        TextButton(
-                            onClick = {
-                                if (canEditExpense) {
-                                    receiptBitmap = null
-                                    viewModel.onReceiptImageSelected(null)
-                                }
-                            },
-                            enabled = canEditExpense,
-                            contentPadding = PaddingValues(0.dp),
-                            modifier = Modifier.height(24.dp)
-                        ) {
-                            Text("Clear", fontSize = 13.sp, color = colorScheme.error)
-                        }
-                    }
-                }
-                
-                Spacer(modifier = Modifier.height(12.dp))
+        // --- Receipt Scanner Section ---
+        Text("Receipt (Optional)", fontSize = 14.sp, color = colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
 
-                if (receiptBitmap != null) {
-                    Image(
-                        bitmap = receiptBitmap!!.asImageBitmap(),
-                        contentDescription = "Receipt preview",
-                        contentScale = ContentScale.Crop,
+        if (receiptBitmap != null) {
+            // Sleek Image Container
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .border(1.dp, colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+                    .clickable { showReceiptPreview = true }
+            ) {
+                Image(
+                    bitmap = receiptBitmap!!.asImageBitmap(),
+                    contentDescription = "Receipt preview",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                // Floating Action Overlay
+                if (canEditExpense) {
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(140.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .border(1.dp, colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-                            .clickable(enabled = canEditExpense) {
-                                val imageUri = createReceiptImageUri(context)
-                                if (imageUri != null) {
-                                    currentReceiptUri = imageUri
-                                    cameraLauncher.launch(imageUri)
-                                }
-                            }
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = { viewModel.extractTotalFromReceipt() },
-                            enabled = canEditExpense && !uiState.isExtractingTotal,
-                            colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primaryContainer, contentColor = colorScheme.onPrimaryContainer),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f).height(40.dp)
-                        ) {
-                            Text(if (uiState.isExtractingTotal) "Reading..." else "Get Total", fontSize = 13.sp)
-                        }
-                        Button(
-                            onClick = { viewModel.extractItemsFromReceipt() },
-                            enabled = canEditExpense && !uiState.isExtractingItems,
-                            colors = ButtonDefaults.buttonColors(containerColor = colorScheme.secondaryContainer, contentColor = colorScheme.onSecondaryContainer),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f).height(40.dp)
-                        ) {
-                            Text(if (uiState.isExtractingItems) "Reading..." else "Get Items", fontSize = 13.sp)
-                        }
-                    }
-                } else {
-                    Button(
-                        onClick = {
-                            val hasCameraPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-                            if (!hasCameraPermission) {
-                                pendingReceiptCapture = true
-                                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                            } else {
-                                val imageUri = createReceiptImageUri(context)
-                                if (imageUri == null) {
-                                    viewModel.setErrorMessage("Could not prepare a receipt image file")
-                                } else {
-                                    currentReceiptUri = imageUri
-                                    runCatching { cameraLauncher.launch(imageUri) }
-                                        .onFailure { viewModel.setErrorMessage("Could not open the camera") }
-                                }
-                            }
-                        },
-                        enabled = canEditExpense,
-                        colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primary),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                            .background(Color.Black.copy(alpha = 0.4f))
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                            .align(Alignment.TopCenter),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(imageVector = Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.size(8.dp))
-                        Text("Capture Receipt")
+                        IconButton(
+                            onClick = {
+                                val rotated = rotateBitmapIfNeeded(receiptBitmap!!, 90f)
+                                receiptBitmap = rotated
+                                viewModel.onReceiptImageSelected(rotated.toJpegBytes(quality = 92))
+                            },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(Icons.Default.Rotate90DegreesCw, contentDescription = "Rotate", tint = Color.White, modifier = Modifier.size(20.dp))
+                        }
+
+                        Row {
+                            IconButton(
+                                onClick = { launchReceiptCapture() },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = "Retake", tint = Color.White, modifier = Modifier.size(22.dp))
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            IconButton(
+                                onClick = {
+                                    receiptBitmap = null
+                                    viewModel.onReceiptImageSelected(null)
+                                },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color.White, modifier = Modifier.size(22.dp))
+                            }
+                        }
                     }
                 }
+            }
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            // Extract Actions
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { viewModel.extractTotalFromReceipt() },
+                    enabled = canEditExpense && !uiState.isExtractingTotal,
+                    colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primaryContainer, contentColor = colorScheme.onPrimaryContainer),
+                    shape = CircleShape,
+                    modifier = Modifier.weight(1f).height(44.dp)
+                ) {
+                    Text(if (uiState.isExtractingTotal) "Reading..." else "Get Total", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Button(
+                    onClick = { viewModel.extractItemsFromReceipt() },
+                    enabled = canEditExpense && !uiState.isExtractingItems,
+                    colors = ButtonDefaults.buttonColors(containerColor = colorScheme.secondaryContainer, contentColor = colorScheme.onSecondaryContainer),
+                    shape = CircleShape,
+                    modifier = Modifier.weight(1f).height(44.dp)
+                ) {
+                    Text(if (uiState.isExtractingItems) "Reading..." else "Get Items", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        } else {
+            // Empty State Camera Button
+            Button(
+                onClick = { launchReceiptCapture() },
+                enabled = canEditExpense,
+                colors = ButtonDefaults.buttonColors(containerColor = colorScheme.surfaceVariant, contentColor = colorScheme.onSurfaceVariant),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth().height(80.dp)
+            ) {
+                Icon(imageVector = Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(24.dp))
+                Spacer(modifier = Modifier.size(12.dp))
+                Text("Capture Receipt", fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            }
+        }
 
-                // Receipt Items List
-                if (uiState.detectedReceiptItems.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("Detected Items", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = colorScheme.onSurfaceVariant)
-                    Spacer(modifier = Modifier.height(8.dp))
-
+        // --- Receipt Items Ledger ---
+        if (uiState.detectedReceiptItems.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(24.dp))
+            Text("Receipt Items", fontSize = 14.sp, color = colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
+            
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, colorScheme.outlineVariant.copy(alpha = 0.5f))
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
                     uiState.detectedReceiptItems.forEachIndexed { index, item ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            OutlinedTextField(
+                            // Clean TextFields for Ledger Look
+                            TextField(
                                 value = String.format(Locale.US, "%.3f", (item.quantity ?: 1.0)).trimEnd('0').trimEnd('.'),
                                 onValueChange = { value -> viewModel.onReceiptItemQuantityChanged(index, value) },
-                                modifier = Modifier.weight(0.5f),
+                                modifier = Modifier.weight(0.6f),
                                 enabled = canEditExpense,
-                                shape = RoundedCornerShape(8.dp),
-                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
+                                placeholder = { Text("Qty", fontSize = 13.sp) },
+                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp),
                                 singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = Color.Transparent,
+                                    unfocusedContainerColor = Color.Transparent,
+                                    disabledContainerColor = Color.Transparent,
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent,
+                                    disabledIndicatorColor = Color.Transparent
+                                )
                             )
-                            OutlinedTextField(
+                            TextField(
                                 value = item.name,
                                 onValueChange = { value -> viewModel.onReceiptItemNameChanged(index, value) },
-                                modifier = Modifier.weight(1.2f),
+                                modifier = Modifier.weight(1.5f),
                                 enabled = canEditExpense,
-                                shape = RoundedCornerShape(8.dp),
-                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
-                                singleLine = true
+                                placeholder = { Text("Item Name", fontSize = 13.sp) },
+                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp),
+                                singleLine = true,
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = Color.Transparent,
+                                    unfocusedContainerColor = Color.Transparent,
+                                    disabledContainerColor = Color.Transparent,
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent,
+                                    disabledIndicatorColor = Color.Transparent
+                                )
                             )
-                            OutlinedTextField(
+                            TextField(
                                 value = if (item.amount == 0.0) "" else String.format(Locale.US, "%.2f", item.amount),
                                 onValueChange = { value -> viewModel.onReceiptItemAmountChanged(index, value) },
-                                modifier = Modifier.weight(0.7f),
+                                modifier = Modifier.weight(0.8f),
                                 enabled = canEditExpense,
-                                shape = RoundedCornerShape(8.dp),
-                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
+                                placeholder = { Text("Amount", fontSize = 13.sp) },
+                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, textAlign = TextAlign.End),
                                 singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = Color.Transparent,
+                                    unfocusedContainerColor = Color.Transparent,
+                                    disabledContainerColor = Color.Transparent,
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent,
+                                    disabledIndicatorColor = Color.Transparent
+                                )
                             )
                             IconButton(
                                 onClick = { viewModel.removeReceiptItem(index) },
                                 enabled = canEditExpense,
-                                modifier = Modifier.size(32.dp)
+                                modifier = Modifier.size(28.dp)
                             ) {
-                                Icon(Icons.Default.Delete, contentDescription = "Remove", tint = colorScheme.error, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Delete, contentDescription = "Remove", tint = colorScheme.error.copy(alpha = 0.8f), modifier = Modifier.size(18.dp))
                             }
                         }
                         if (index < uiState.detectedReceiptItems.lastIndex) {
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(colorScheme.outlineVariant.copy(alpha = 0.3f)))
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    // Ledger Actions
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(
                             onClick = { viewModel.addReceiptItem() },
                             enabled = canEditExpense,
-                            colors = ButtonDefaults.buttonColors(containerColor = colorScheme.secondaryContainer, contentColor = colorScheme.onSecondaryContainer),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f).height(36.dp)
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
                         ) {
-                            Text("Add Row", fontSize = 12.sp)
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Add Row", fontSize = 13.sp)
                         }
-                        Button(
+                        TextButton(
                             onClick = { viewModel.fillDescriptionFromReceiptItems() },
                             enabled = canEditExpense && uiState.detectedReceiptItems.isNotEmpty(),
-                            colors = ButtonDefaults.buttonColors(containerColor = colorScheme.tertiaryContainer, contentColor = colorScheme.onTertiaryContainer),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f).height(36.dp)
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
                         ) {
-                            Text("Use in description", fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Icon(Icons.Default.EditNote, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Use as Description", fontSize = 13.sp)
                         }
                     }
                 }
-
-                uiState.receiptMessage?.let {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(text = it, color = colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                }
             }
+        }
+
+        uiState.receiptMessage?.let {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(text = it, color = colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        }
+
+        if (showReceiptPreview && receiptBitmap != null) {
+            ReceiptPreviewDialog(
+                bitmap = receiptBitmap!!,
+                onDismiss = { showReceiptPreview = false }
+            )
         }
 
         Spacer(modifier = Modifier.height(32.dp))
@@ -712,6 +807,28 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
     }
 }
 
+@Composable
+private fun ReceiptPreviewDialog(bitmap: Bitmap, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        },
+        title = { Text("Receipt preview") },
+        text = {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = "Receipt image",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(420.dp)
+                    .clip(RoundedCornerShape(12.dp))
+            )
+        }
+    )
+}
+
 private fun Bitmap.toJpegBytes(quality: Int = 90): ByteArray {
     val output = ByteArrayOutputStream()
     compress(Bitmap.CompressFormat.JPEG, quality, output)
@@ -730,9 +847,54 @@ private fun loadPreparedReceipt(context: Context, uri: Uri): Pair<Bitmap, ByteAr
     return runCatching {
         val file = uriToFile(context, uri) ?: return@runCatching null
         val sampledBitmap = decodeSampledBitmap(file, targetMaxDimension = 2200) ?: return@runCatching null
-        val jpegBytes = sampledBitmap.toJpegBytes(quality = 92)
-        sampledBitmap to jpegBytes
+        val rotationDegrees = readExifRotationDegrees(file)
+        val orientedBitmap = rotateBitmapIfNeeded(sampledBitmap, rotationDegrees)
+        val jpegBytes = orientedBitmap.toJpegBytes(quality = 92)
+        orientedBitmap to jpegBytes
     }.getOrNull()
+}
+
+private fun loadPreparedReceiptFromPath(context: Context, imagePath: String): Pair<Bitmap, ByteArray>? {
+    return runCatching {
+        when {
+            imagePath.startsWith("http://", ignoreCase = true) || imagePath.startsWith("https://", ignoreCase = true) -> {
+                val temp = File(context.cacheDir, "receipt_remote_${System.currentTimeMillis()}.jpg")
+                URL(imagePath).openStream().use { input ->
+                    FileOutputStream(temp).use { output -> input.copyTo(output) }
+                }
+                loadPreparedReceipt(context, Uri.fromFile(temp))
+            }
+            imagePath.startsWith("content://", ignoreCase = true) || imagePath.startsWith("file://", ignoreCase = true) -> {
+                loadPreparedReceipt(context, Uri.parse(imagePath))
+            }
+            else -> {
+                val localFile = File(imagePath)
+                if (!localFile.exists()) null else loadPreparedReceipt(context, Uri.fromFile(localFile))
+            }
+        }
+    }.getOrNull()
+}
+
+private fun readExifRotationDegrees(file: File): Float {
+    return runCatching {
+        when (ExifInterface(file.absolutePath).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+            ExifInterface.ORIENTATION_ROTATE_90,
+            ExifInterface.ORIENTATION_TRANSPOSE -> 90f
+            ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+            ExifInterface.ORIENTATION_ROTATE_270,
+            ExifInterface.ORIENTATION_TRANSVERSE -> 270f
+            else -> 0f
+        }
+    }.getOrDefault(0f)
+}
+
+private fun rotateBitmapIfNeeded(bitmap: Bitmap, rotationDegrees: Float): Bitmap {
+    if (rotationDegrees == 0f) return bitmap
+
+    val matrix = Matrix().apply { postRotate(rotationDegrees) }
+    return runCatching {
+        Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    }.getOrElse { bitmap }
 }
 
 private fun uriToFile(context: Context, uri: Uri): File? {

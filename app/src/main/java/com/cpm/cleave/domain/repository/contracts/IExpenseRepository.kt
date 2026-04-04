@@ -22,6 +22,7 @@ interface IExpenseRepository {
         splitMemberIds: List<String>,
         payerContributions: Map<String, Double>,
         receiptImageBytes: ByteArray? = null,
+        removeReceiptImage: Boolean = false,
         receiptItems: List<ReceiptItem> = emptyList()
     ): Result<Unit>
     suspend fun createExpense(

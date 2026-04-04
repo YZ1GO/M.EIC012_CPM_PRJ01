@@ -27,6 +27,7 @@ data class AddExpenseUiState(
     val splitMode: SplitMode = SplitMode.ALL_MEMBERS,
     val selectedSplitMemberIds: Set<String> = emptySet(),
     val hasReceiptImage: Boolean = false,
+    val receiptImagePath: String? = null,
     val isExtractingTotal: Boolean = false,
     val isExtractingItems: Boolean = false,
     val detectedReceiptItems: List<ReceiptItem> = emptyList(),

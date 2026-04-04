@@ -405,6 +405,7 @@ class ExpenseRepositoryImpl(
         splitMemberIds: List<String>,
         payerContributions: Map<String, Double>,
         receiptImageBytes: ByteArray?,
+        removeReceiptImage: Boolean,
         receiptItems: List<ReceiptItem>
     ): Result<Unit> {
         return try {
@@ -466,6 +467,8 @@ class ExpenseRepositoryImpl(
                         localPath
                     }
                 }
+            } else if (removeReceiptImage) {
+                null
             } else {
                 existingExpense!!.imagePath
             }
