@@ -118,9 +118,6 @@ class GroupDetailsViewModel(
                                 TAG,
                                 "collect success groupId=$groupId expenses=${data.expenses.size} debts=${data.debts.size} debtsWithReason=${data.debtsWithReason.size} debtsWithoutReasons=$emptyReasons"
                             )
-                            if (data.expenses.isNotEmpty() || data.debts.isNotEmpty()) {
-                                lastSnapshotByGroupId[groupId] = data
-                            }
                             _uiState.update {
                                 val prevExpenses = it.expenses.size
                                 val prevDebts = it.debts.size
@@ -174,6 +171,9 @@ class GroupDetailsViewModel(
                                     TAG,
                                     "ui update groupId=$groupId expenses=$prevExpenses->${nextState.expenses.size} debts=$prevDebts->${nextState.debts.size} debtsWithReason=$prevDebtsWithReason->${nextState.debtsWithReason.size}"
                                 )
+                                if (nextState.expenses.isNotEmpty() || nextState.debts.isNotEmpty()) {
+                                    lastSnapshotByGroupId[groupId] = toCachedSnapshot(data, nextState)
+                                }
                                 nextState
                             }
                         }
@@ -238,7 +238,7 @@ class GroupDetailsViewModel(
                         val stableCurrentUserId = data.currentUserId ?: it.currentUserId
                         val stableTotalYouOwe = if (data.currentUserId != null) data.totalYouOwe else it.totalYouOwe
                         val stableTotalOwedToYou = if (data.currentUserId != null) data.totalOwedToYou else it.totalOwedToYou
-                        it.copy(
+                        val nextState = it.copy(
                             isLoading = false,
                             currentUserId = stableCurrentUserId,
                             group = data.group,
@@ -254,6 +254,10 @@ class GroupDetailsViewModel(
                             editedGroupName = if (it.isEditingGroup) it.editedGroupName else data.group.name,
                             errorMessage = preservedError
                         )
+                        if (nextState.expenses.isNotEmpty() || nextState.debts.isNotEmpty()) {
+                            lastSnapshotByGroupId[groupId] = toCachedSnapshot(data, nextState)
+                        }
+                        nextState
                     }
                 }
                 .onFailure { error ->
@@ -265,6 +269,21 @@ class GroupDetailsViewModel(
                     }
                 }
         }
+    }
+
+    private fun toCachedSnapshot(data: GroupDetailsData, state: GroupDetailsUiState): GroupDetailsData {
+        return GroupDetailsData(
+            group = data.group,
+            expenses = state.expenses,
+            debts = state.debts,
+            debtsWithReason = state.debtsWithReason,
+            totalYouOwe = state.totalYouOwe,
+            totalOwedToYou = state.totalOwedToYou,
+            userDisplayNames = data.userDisplayNames,
+            userPhotoUrls = data.userPhotoUrls,
+            userLastSeen = data.userLastSeen,
+            currentUserId = state.currentUserId
+        )
     }
 
     fun onDebtClicked(debt: Debt) {
