@@ -19,6 +19,7 @@ import com.cpm.cleave.model.Group
 import com.cpm.cleave.model.ReceiptItem
 import com.google.android.gms.tasks.Task
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -675,14 +676,17 @@ class GroupRepositoryImpl(
     override suspend fun getGroups(): Result<List<Group>> {
         return try {
             val currentUser = authSessionStore.getActiveUser()
-            val firebaseUserId = firebaseAuth.currentUser?.uid
+            val firebaseUser = firebaseAuth.currentUser
+            val firebaseUserId = firebaseUser?.uid
             val effectiveUserId = firebaseUserId ?: currentUser?.id
+            val hasUserMismatch = !firebaseUserId.isNullOrBlank() && currentUser?.id != firebaseUserId
 
             if (effectiveUserId.isNullOrBlank()) {
                 return Result.success(emptyList())
             }
 
-            if (!firebaseUserId.isNullOrBlank() && currentUser?.id != firebaseUserId) {
+            if (hasUserMismatch) {
+                firebaseUser?.let { ensureLocalSessionMatchesFirebaseUser(it) }
                 android.util.Log.w(
                     "GroupRepo",
                     "Using Firebase UID for group fetch due to local session mismatch. firebaseUid=$firebaseUserId localUid=${currentUser?.id}"
@@ -719,7 +723,9 @@ class GroupRepositoryImpl(
                     }
                 }
 
-                flushPendingGroupSyncs()
+                if (!hasUserMismatch) {
+                    flushPendingGroupSyncs()
+                }
 
                 warmExpensesCache(remoteGroups.map { it.id })
                 remoteGroups
@@ -755,6 +761,31 @@ class GroupRepositoryImpl(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    private suspend fun ensureLocalSessionMatchesFirebaseUser(firebaseUser: FirebaseUser) {
+        if (firebaseUser.isAnonymous) {
+            val guestName = firebaseUser.displayName?.takeIf { it.isNotBlank() } ?: "Guest"
+            authSessionStore.activateAnonymousUserSession(
+                anonymousUserId = firebaseUser.uid,
+                anonymousName = guestName,
+                anonymousPhotoUrl = firebaseUser.photoUrl?.toString()
+            )
+            return
+        }
+
+        val resolvedName = firebaseUser.displayName
+            ?.takeIf { it.isNotBlank() }
+            ?: firebaseUser.email?.substringBefore("@")
+            ?: "User"
+
+        authSessionStore.activateRegisteredUserAfterAuthentication(
+            registeredUserId = firebaseUser.uid,
+            registeredName = resolvedName,
+            registeredEmail = firebaseUser.email,
+            registeredPhotoUrl = firebaseUser.photoUrl?.toString(),
+            mergeAnonymousData = false
+        )
     }
 
     private suspend fun remoteGroupExists(groupId: String): Boolean {

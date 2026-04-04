@@ -66,6 +66,7 @@ import com.cpm.cleave.ui.features.joingroup.JoinGroupScreen
 import com.cpm.cleave.ui.features.joingroup.JoinGroupViewModel
 import com.cpm.cleave.ui.features.profile.ProfileScreen
 import com.cpm.cleave.ui.features.profile.ProfileViewModel
+import kotlinx.coroutines.launch
 
 sealed class NavScreen(val route: String, val title: String, val icon: ImageVector? = null) {
     object Groups : NavScreen("groups", "Groups", Icons.Default.Groups)
@@ -111,6 +112,16 @@ fun MainScreen(
     var groupsSessionKey by remember { mutableIntStateOf(0) }
     var groupsRefreshNonce by remember { mutableIntStateOf(0) }
     var lastConsumedDeepLinkJoinCode by remember { mutableStateOf<String?>(null) }
+    val authRefreshScope = rememberCoroutineScope()
+
+    fun completeAuthentication(onComplete: () -> Unit) {
+        authRefreshScope.launch {
+            runCatching { authRepository.getCurrentUser() }
+            groupsSessionKey++
+            groupsRefreshNonce++
+            onComplete()
+        }
+    }
 
     LaunchedEffect(Unit) {
         authRepository.getCurrentUser()
@@ -143,7 +154,9 @@ fun MainScreen(
             onAuthenticated = {
                 shouldAutoCreateGuest = true
                 openAuthInRegisterMode = false
-                isAuthenticated = true
+                completeAuthentication {
+                    isAuthenticated = true
+                }
             },
             showContinueAsGuest = true
         )
@@ -262,7 +275,9 @@ fun MainScreen(
                         defaultRegisterMode = registerMode,
                         onAuthenticated = {
                             openAuthInRegisterMode = false
-                            navController.popBackStack()
+                            completeAuthentication {
+                                navController.popBackStack()
+                            }
                         },
                         showContinueAsGuest = false
                     )

@@ -277,6 +277,12 @@ override suspend fun signUpWithEmail(
         email: String, password: String, mergeAnonymousData: Boolean
     ): Result<User> {
         return try {
+            if (!mergeAnonymousData && shouldRequireMergeForGuestDebts()) {
+                return Result.failure(
+                    IllegalStateException("Enable Merge guest data to continue. Your guest account has debts to preserve.")
+                )
+            }
+
             val oldState = captureAnonymousState()
 
             val authResult = firebaseAuth.signInWithEmailAndPassword(email.trim(), password).awaitTaskResult()
@@ -310,6 +316,12 @@ override suspend fun signUpWithEmail(
         idToken: String, mergeAnonymousData: Boolean
     ): Result<User> {
         return try {
+            if (!mergeAnonymousData && shouldRequireMergeForGuestDebts()) {
+                return Result.failure(
+                    IllegalStateException("Enable Merge guest data to continue. Your guest account has debts to preserve.")
+                )
+            }
+
             val oldState = captureAnonymousState()
 
             val credential = GoogleAuthProvider.getCredential(idToken, null)
@@ -358,8 +370,6 @@ override suspend fun signUpWithEmail(
         if (shouldMerge && oldState.id != null && oldState.id != newUid) {
             // Migrate cloud data
             reassignAnonymousToRegisteredUserInFirestore(oldState.id, newUid, oldState.groupIds)
-            
-            kotlinx.coroutines.delay(1000)
         }
     }
 
@@ -676,8 +686,38 @@ override suspend fun signUpWithEmail(
         }
         firstBatch.commit().awaitTaskResult()
 
-        // Wait a half-second to guarantee the Firestore Rules Engine has cached Phase 1
-        kotlinx.coroutines.delay(500)
+        // Keep the transition snappy; rely on retry-safe repository flows for eventual consistency.
+
+        // =========================================================================
+        // PHASE 1.5: Ownership Transfer
+        // Member delete is owner-only in rules. If the guest created the group,
+        // transfer ownership first so cleanup can proceed with the registered UID.
+        // =========================================================================
+        var ownershipBatch = firestore.batch()
+        var ownershipOps = 0
+        val ownershipTransferredGroupIds = mutableSetOf<String>()
+        candidateGroupIds.forEach { groupId ->
+            val groupRef = firestore.collection("groups").document(groupId)
+            val ownerId = runCatching {
+                groupRef.get().awaitTaskResult().getString("ownerId")
+            }.getOrNull()
+
+            if (ownerId == oldUserId) {
+                ownershipBatch.update(
+                    groupRef,
+                    mapOf(
+                        "ownerId" to newUserId,
+                        "updatedAt" to now
+                    )
+                )
+                ownershipOps++
+                ownershipTransferredGroupIds.add(groupId)
+            }
+        }
+
+        if (ownershipOps > 0) {
+            ownershipBatch.commit().awaitTaskResult()
+        }
 
         // =========================================================================
         // PHASE 2: Remote-Driven Reassignment
@@ -752,14 +792,54 @@ override suspend fun signUpWithEmail(
                 }
             }
 
-            // 2. Delete the old guest member document
-            ensureCapacity(1)
-            secondBatch.delete(groupRef.collection("members").document(oldUserId))
-            opCount++
         }
 
         if (opCount > 0) {
             secondBatch.commit().awaitTaskResult()
+        }
+
+        // 3. Cleanup old guest member documents in independent operations.
+        // Keeping this outside the main batch avoids failing all migration writes
+        // if ownership propagation is still settling for one group.
+        candidateGroupIds.forEach { groupId ->
+            val ownershipJustTransferred = groupId in ownershipTransferredGroupIds
+            cleanupLegacyMemberDoc(
+                groupId = groupId,
+                oldUserId = oldUserId,
+                newUserId = newUserId,
+                ownershipJustTransferred = ownershipJustTransferred
+            )
+        }
+    }
+
+    private suspend fun cleanupLegacyMemberDoc(
+        groupId: String,
+        oldUserId: String,
+        newUserId: String,
+        ownershipJustTransferred: Boolean
+    ) {
+        val groupRef = firestore.collection("groups").document(groupId)
+        val oldMemberRef = groupRef.collection("members").document(oldUserId)
+
+        if (ownershipJustTransferred) {
+            repeat(3) { attempt ->
+                val deleted = runCatching {
+                    oldMemberRef.delete().awaitTaskResult()
+                    true
+                }.getOrDefault(false)
+
+                if (deleted) return
+                if (attempt < 2) kotlinx.coroutines.delay(120)
+            }
+            return
+        }
+
+        val currentOwnerId = runCatching {
+            groupRef.get().awaitTaskResult().getString("ownerId")
+        }.getOrNull()
+
+        if (currentOwnerId == newUserId) {
+            runCatching { oldMemberRef.delete().awaitTaskResult() }
         }
     }
 
@@ -780,6 +860,12 @@ override suspend fun signUpWithEmail(
             }
         }
         return false
+    }
+
+    private suspend fun shouldRequireMergeForGuestDebts(): Boolean {
+        val activeUser = authSessionStore.getActiveUser() ?: return false
+        if (!activeUser.isAnonymous) return false
+        return hasAnonymousFinancialFootprint(activeUser.id)
     }
 
     private suspend fun removeAnonymousUserFromAllGroupsInFirestore(

@@ -225,36 +225,13 @@ fun AuthScreen(
             }
         )
 
-        // Options & Forgot Password Row
+        // --- Options & Forgot Password ---
         if (!uiState.isRegisterMode) {
-            Spacer(modifier = Modifier.height(8.dp))
+            // 1. Forgot Password (Right Aligned - tied to Email)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.End
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { viewModel.setMergeGuestDataOnSignIn(!uiState.mergeGuestDataOnSignIn) }
-                        .padding(end = 8.dp)
-                ) {
-                    Checkbox(
-                        checked = uiState.mergeGuestDataOnSignIn,
-                        onCheckedChange = null,
-                        enabled = !uiState.isLoading
-                    )
-                    
-                    Spacer(modifier = Modifier.width(4.dp))
-                    
-                    Text(
-                        text = "Merge guest data",
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
                 TextButton(
                     onClick = { viewModel.sendPasswordResetEmail() },
                     enabled = !uiState.isLoading,
@@ -263,8 +240,46 @@ fun AuthScreen(
                     Text("Forgot password?", fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 }
             }
-        } else {
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 2. Global Merge Data Toggle Card
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                    .clickable { viewModel.setMergeGuestDataOnSignIn(!uiState.mergeGuestDataOnSignIn) }
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(
+                    checked = uiState.mergeGuestDataOnSignIn,
+                    onCheckedChange = null,
+                    enabled = !uiState.isLoading
+                )
+                
+                Spacer(modifier = Modifier.width(8.dp))
+                
+                Column {
+                    Text(
+                        text = "Merge local guest data",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Applies to both Email and Google Sign-In",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             Spacer(modifier = Modifier.height(24.dp))
+        } else {
+            // In Register Mode, merging happens automatically to upgrade the guest account.
+            Spacer(modifier = Modifier.height(32.dp))
         }
 
         // --- FLUID ANIMATED MESSAGES ---
