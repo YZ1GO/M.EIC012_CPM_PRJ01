@@ -723,7 +723,7 @@ fun GroupDetailsScreen(
             )
         }
         uiState.selectedMemberForExpulsionId?.let { memberId ->
-            val memberName = uiState.userDisplayNames[memberId] ?: memberId
+            val memberName = resolveDisplayName(uiState.userDisplayNames, memberId)
             AlertDialog(
                 onDismissRequest = { viewModel.dismissMemberExpulsionDialog() },
                 title = { Text("Remove member") },
@@ -743,7 +743,7 @@ fun GroupDetailsScreen(
             )
         }
         uiState.selectedMemberForProfileId?.let { memberId ->
-            val memberName = uiState.userDisplayNames[memberId] ?: memberId
+            val memberName = resolveDisplayName(uiState.userDisplayNames, memberId)
             val photoUrl = resolveMemberPhotoUrl(uiState.userPhotoUrls, memberId)
             val lastSeen = uiState.userLastSeen[memberId]
             val canRemoveMember = uiState.canDeleteGroup && memberId != currentGroup.ownerId
@@ -779,8 +779,8 @@ fun GroupDetailsScreen(
             )
         }
         uiState.selectedDebtForPayment?.let { selectedDebt ->
-            val fromName = uiState.userDisplayNames[selectedDebt.fromUser] ?: selectedDebt.fromUser
-            val toName = uiState.userDisplayNames[selectedDebt.toUser] ?: selectedDebt.toUser
+            val fromName = resolveDisplayName(uiState.userDisplayNames, selectedDebt.fromUser)
+            val toName = resolveDisplayName(uiState.userDisplayNames, selectedDebt.toUser)
             AlertDialog(
                 onDismissRequest = { viewModel.dismissDebtPaymentDialog() },
                 title = { Text("Pay debt") },
@@ -842,7 +842,7 @@ fun GroupDetailsScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 orderedMembers.forEach { memberId ->
-                    val memberName = uiState.userDisplayNames[memberId] ?: memberId
+                    val memberName = resolveDisplayName(uiState.userDisplayNames, memberId)
                     val memberPhotoUrl = resolveMemberPhotoUrl(uiState.userPhotoUrls, memberId)
                     MemberAvatar(
                         name = memberName,
@@ -896,8 +896,8 @@ fun GroupDetailsScreen(
         } else {
             uiState.debtsWithReason.forEach { debtWithReason ->
                 val debt = debtWithReason.debt
-                val fromName = uiState.userDisplayNames[debt.fromUser] ?: debt.fromUser
-                val toName = uiState.userDisplayNames[debt.toUser] ?: debt.toUser
+                val fromName = resolveDisplayName(uiState.userDisplayNames, debt.fromUser)
+                val toName = resolveDisplayName(uiState.userDisplayNames, debt.toUser)
                 val canSettleDebt = uiState.currentUserId == debt.fromUser
                 val reasonText = debtWithReason.reasons.joinToString(", ") { "${it.expenseLabel}" }.ifBlank { "No expense details" }
                 
@@ -1031,10 +1031,10 @@ private fun ExpenseDetailsItem(
     val desc = expense.description.ifBlank { "(No description)" }
     val payerText = expense.payerContributions
         .joinToString(separator = ", ") { payer ->
-            val name = userDisplayNames[payer.userId] ?: payer.userId
+            val name = resolveDisplayName(userDisplayNames, payer.userId)
             "$name: ${currencySymbol}${"%.2f".format(Locale.getDefault(), payer.amount)}"
         }
-        .ifBlank { userDisplayNames[expense.paidByUserId] ?: expense.paidByUserId }
+        .ifBlank { resolveDisplayName(userDisplayNames, expense.paidByUserId) }
 
     val dateText = formatDate(expense.date)
 
@@ -1203,6 +1203,29 @@ private fun resolveMemberPhotoUrl(
         ?: userPhotoUrls.entries.firstOrNull { entry ->
             entry.key.trim().substringAfterLast('/') == normalizedId
         }?.value
+}
+
+private fun resolveDisplayName(
+    userDisplayNames: Map<String, String>,
+    userId: String
+): String {
+    val normalizedId = userId.trim().substringAfterLast('/')
+    val resolvedName = userDisplayNames[userId]
+        ?: userDisplayNames[normalizedId]
+        ?: userDisplayNames.entries.firstOrNull { entry ->
+            entry.key.trim().substringAfterLast('/') == normalizedId
+        }?.value
+
+    if (!resolvedName.isNullOrBlank()) {
+        return resolvedName
+    }
+
+    if (normalizedId.contains("guest", ignoreCase = true) || normalizedId.contains("anon", ignoreCase = true)) {
+        val suffix = normalizedId.takeLast(4).uppercase(Locale.ROOT).ifBlank { "USER" }
+        return "Guest-$suffix"
+    }
+
+    return "User"
 }
 
 @Composable

@@ -322,7 +322,10 @@ fun MainScreen(
                             GroupDetailsViewModel(
                                 groupId = id, 
                                 getGroupDetailsUseCase = GetGroupDetailsUseCase(groupRepository, expenseRepository, authRepository), 
-                                requestSettleDebtUseCase = RequestSettleDebtUseCase(RequestCreateExpenseUseCase(expenseRepository)),
+                                requestSettleDebtUseCase = RequestSettleDebtUseCase(
+                                    requestCreateExpenseUseCase = RequestCreateExpenseUseCase(expenseRepository),
+                                    authRepository = authRepository
+                                ),
                                 requestDeleteExpenseUseCase = RequestDeleteExpenseUseCase(expenseRepository),
                                 requestDeleteGroupUseCase = RequestDeleteGroupUseCase(groupRepository),
                                 requestExpelGroupMemberUseCase = RequestExpelGroupMemberUseCase(groupRepository),
