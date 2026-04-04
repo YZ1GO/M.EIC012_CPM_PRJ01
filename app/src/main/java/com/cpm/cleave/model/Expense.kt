@@ -11,3 +11,7 @@ data class Expense(
     val payerContributions: List<PayerContribution> = emptyList(),
     val receiptItems: List<ReceiptItem> = emptyList()
 )
+
+fun Expense.isDebtSettlementExpense(): Boolean {
+    return description.trimStart().startsWith("PAYMENT:")
+}

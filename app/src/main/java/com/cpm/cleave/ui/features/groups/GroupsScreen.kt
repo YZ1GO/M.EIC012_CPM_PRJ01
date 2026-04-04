@@ -96,6 +96,8 @@ import coil.compose.AsyncImage
 import com.cpm.cleave.R
 import com.cpm.cleave.model.Expense
 import com.cpm.cleave.model.Group
+import com.cpm.cleave.model.isDebtSettlementExpense
+import com.cpm.cleave.ui.features.addexpense.EditExpensePrefillStore
 import com.cpm.cleave.ui.features.creategroup.globalCurrencies
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
@@ -1004,8 +1006,6 @@ fun GroupDetailsScreen(
                 val fromName = resolveDisplayName(uiState.userDisplayNames, debt.fromUser)
                 val toName = resolveDisplayName(uiState.userDisplayNames, debt.toUser)
                 val canSettleDebt = uiState.currentUserId == debt.fromUser
-                val reasonText = debtWithReason.reasons
-                    .joinToString(", ") { "${it.expenseLabel}" }
                 
                 Row(
                     modifier = Modifier
@@ -1022,10 +1022,6 @@ fun GroupDetailsScreen(
                             Text(fromName, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = colorScheme.onSurface)
                             Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "owes", modifier = Modifier.padding(horizontal = 6.dp).size(16.dp), tint = colorScheme.onSurfaceVariant)
                             Text(toName, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = colorScheme.onSurface)
-                        }
-                        if (reasonText.isNotBlank()) {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(reasonText, color = colorScheme.onSurfaceVariant, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                     Text(
@@ -1048,11 +1044,23 @@ fun GroupDetailsScreen(
             Text("No expenses recorded yet.", color = colorScheme.onSurfaceVariant, fontSize = 14.sp)
         } else {
             uiState.expenses.forEach { expense ->
+                val expenseClick: (() -> Unit)? = if (expense.isDebtSettlementExpense()) {
+                    null
+                } else {
+                    {
+                        EditExpensePrefillStore.put(
+                            groupId = currentGroup.id,
+                            expense = expense,
+                            displayNames = uiState.userDisplayNames
+                        )
+                        onAddExpenseClick(currentGroup.id, expense.id)
+                    }
+                }
                 ExpenseDetailsItem(
                     expense = expense,
                     userDisplayNames = uiState.userDisplayNames,
                     currencySymbol = currencySymbol,
-                    onClick = { onAddExpenseClick(currentGroup.id, expense.id) },
+                    onClick = expenseClick,
                     onLongPress = if (uiState.canDeleteGroup) { { viewModel.onExpenseLongPressed(expense.id) } } else null,
                     onViewReceipt = { receiptUrl -> selectedReceiptUrl = receiptUrl }
                 )

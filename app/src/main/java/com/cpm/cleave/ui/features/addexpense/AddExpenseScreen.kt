@@ -45,6 +45,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -87,6 +88,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
     val context = LocalContext.current
     val scrollState = rememberScrollState()
     val colorScheme = MaterialTheme.colorScheme
+    val canEditExpense = !uiState.isEditing || uiState.canEditExpense
 
     var receiptBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var currentReceiptUri by remember { mutableStateOf<Uri?>(null) }
@@ -155,6 +157,34 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
             .padding(24.dp),
         horizontalAlignment = Alignment.Start
     ) {
+        if (uiState.isEditing && uiState.isLoading && uiState.amountInput.isBlank() && uiState.description.isBlank()) {
+            Spacer(modifier = Modifier.height(48.dp))
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = colorScheme.primary)
+            }
+            return@Column
+        }
+
+        AnimatedVisibility(
+            visible = uiState.isEditing && !uiState.canEditExpense,
+            enter = fadeIn(animationSpec = tween(250)) + expandVertically(animationSpec = tween(250)),
+            exit = fadeOut(animationSpec = tween(250)) + shrinkVertically(animationSpec = tween(250))
+        ) {
+            Surface(
+                color = colorScheme.errorContainer.copy(alpha = 0.45f),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "Debt payment expenses can't be edited.",
+                    color = colorScheme.onErrorContainer,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(16.dp)
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
 
         // --- Header ---
@@ -174,6 +204,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
             onValueChange = { viewModel.onDescriptionChanged(it) },
             placeholder = { Text("Dinner, groceries, fuel...", color = colorScheme.onSurface.copy(alpha = 0.3f)) },
             modifier = Modifier.fillMaxWidth(),
+            enabled = canEditExpense,
             shape = RoundedCornerShape(12.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 unfocusedBorderColor = colorScheme.outlineVariant,
@@ -192,6 +223,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
             onValueChange = { viewModel.onAmountChanged(it) },
             placeholder = { Text("0.00", color = colorScheme.onSurface.copy(alpha = 0.3f)) },
             modifier = Modifier.fillMaxWidth(),
+            enabled = canEditExpense,
             shape = RoundedCornerShape(12.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 unfocusedBorderColor = colorScheme.outlineVariant,
@@ -218,7 +250,13 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                     Text("Receipt Scanner", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = colorScheme.onSurface)
                     if (receiptBitmap != null) {
                         TextButton(
-                            onClick = { receiptBitmap = null; viewModel.onReceiptImageSelected(null) },
+                            onClick = {
+                                if (canEditExpense) {
+                                    receiptBitmap = null
+                                    viewModel.onReceiptImageSelected(null)
+                                }
+                            },
+                            enabled = canEditExpense,
                             contentPadding = PaddingValues(0.dp),
                             modifier = Modifier.height(24.dp)
                         ) {
@@ -239,7 +277,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                             .height(140.dp)
                             .clip(RoundedCornerShape(12.dp))
                             .border(1.dp, colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-                            .clickable {
+                            .clickable(enabled = canEditExpense) {
                                 val imageUri = createReceiptImageUri(context)
                                 if (imageUri != null) {
                                     currentReceiptUri = imageUri
@@ -252,7 +290,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
                             onClick = { viewModel.extractTotalFromReceipt() },
-                            enabled = !uiState.isExtractingTotal,
+                            enabled = canEditExpense && !uiState.isExtractingTotal,
                             colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primaryContainer, contentColor = colorScheme.onPrimaryContainer),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.weight(1f).height(40.dp)
@@ -261,7 +299,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                         }
                         Button(
                             onClick = { viewModel.extractItemsFromReceipt() },
-                            enabled = !uiState.isExtractingItems,
+                            enabled = canEditExpense && !uiState.isExtractingItems,
                             colors = ButtonDefaults.buttonColors(containerColor = colorScheme.secondaryContainer, contentColor = colorScheme.onSecondaryContainer),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.weight(1f).height(40.dp)
@@ -276,16 +314,18 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                             if (!hasCameraPermission) {
                                 pendingReceiptCapture = true
                                 cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                                return@Button
+                            } else {
+                                val imageUri = createReceiptImageUri(context)
+                                if (imageUri == null) {
+                                    viewModel.setErrorMessage("Could not prepare a receipt image file")
+                                } else {
+                                    currentReceiptUri = imageUri
+                                    runCatching { cameraLauncher.launch(imageUri) }
+                                        .onFailure { viewModel.setErrorMessage("Could not open the camera") }
+                                }
                             }
-                            val imageUri = createReceiptImageUri(context) ?: run {
-                                viewModel.setErrorMessage("Could not prepare a receipt image file")
-                                return@Button
-                            }
-                            currentReceiptUri = imageUri
-                            runCatching { cameraLauncher.launch(imageUri) }
-                                .onFailure { viewModel.setErrorMessage("Could not open the camera") }
                         },
+                        enabled = canEditExpense,
                         colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primary),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth().height(48.dp)
@@ -312,6 +352,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                                 value = String.format(Locale.US, "%.3f", (item.quantity ?: 1.0)).trimEnd('0').trimEnd('.'),
                                 onValueChange = { value -> viewModel.onReceiptItemQuantityChanged(index, value) },
                                 modifier = Modifier.weight(0.5f),
+                                enabled = canEditExpense,
                                 shape = RoundedCornerShape(8.dp),
                                 textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
                                 singleLine = true,
@@ -321,6 +362,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                                 value = item.name,
                                 onValueChange = { value -> viewModel.onReceiptItemNameChanged(index, value) },
                                 modifier = Modifier.weight(1.2f),
+                                enabled = canEditExpense,
                                 shape = RoundedCornerShape(8.dp),
                                 textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
                                 singleLine = true
@@ -329,6 +371,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                                 value = if (item.amount == 0.0) "" else String.format(Locale.US, "%.2f", item.amount),
                                 onValueChange = { value -> viewModel.onReceiptItemAmountChanged(index, value) },
                                 modifier = Modifier.weight(0.7f),
+                                enabled = canEditExpense,
                                 shape = RoundedCornerShape(8.dp),
                                 textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
                                 singleLine = true,
@@ -336,6 +379,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                             )
                             IconButton(
                                 onClick = { viewModel.removeReceiptItem(index) },
+                                enabled = canEditExpense,
                                 modifier = Modifier.size(32.dp)
                             ) {
                                 Icon(Icons.Default.Delete, contentDescription = "Remove", tint = colorScheme.error, modifier = Modifier.size(18.dp))
@@ -350,6 +394,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
                             onClick = { viewModel.addReceiptItem() },
+                            enabled = canEditExpense,
                             colors = ButtonDefaults.buttonColors(containerColor = colorScheme.secondaryContainer, contentColor = colorScheme.onSecondaryContainer),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.weight(1f).height(36.dp)
@@ -358,7 +403,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                         }
                         Button(
                             onClick = { viewModel.fillDescriptionFromReceiptItems() },
-                            enabled = uiState.detectedReceiptItems.isNotEmpty(),
+                            enabled = canEditExpense && uiState.detectedReceiptItems.isNotEmpty(),
                             colors = ButtonDefaults.buttonColors(containerColor = colorScheme.tertiaryContainer, contentColor = colorScheme.onTertiaryContainer),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.weight(1f).height(36.dp)
@@ -393,7 +438,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                     .weight(1f)
                     .clip(RoundedCornerShape(10.dp))
                     .background(if (uiState.buyerMode == BuyerMode.SINGLE_BUYER) colorScheme.surface else Color.Transparent)
-                    .clickable { viewModel.onBuyerModeChanged(BuyerMode.SINGLE_BUYER) }
+                    .clickable(enabled = canEditExpense) { viewModel.onBuyerModeChanged(BuyerMode.SINGLE_BUYER) }
                     .padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -409,7 +454,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                     .weight(1f)
                     .clip(RoundedCornerShape(10.dp))
                     .background(if (uiState.buyerMode == BuyerMode.SELECT_BUYERS) colorScheme.surface else Color.Transparent)
-                    .clickable {
+                    .clickable(enabled = canEditExpense) {
                         viewModel.onBuyerModeChanged(BuyerMode.SELECT_BUYERS)
                         if (uiState.selectedPayerIds.isEmpty() && totalExpenseAmount > 0) {
                             val splitAmount = totalExpenseAmount / uiState.availablePayers.size
@@ -435,13 +480,22 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
         Spacer(modifier = Modifier.height(16.dp))
 
         if (uiState.buyerMode == BuyerMode.SINGLE_BUYER) {
+            val primaryPayerLabel = labelForMember(uiState.primaryBuyerId)
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 color = colorScheme.primaryContainer.copy(alpha = 0.5f)
             ) {
                 Text(
-                    text = "You pay the full amount",
+                    text = if (uiState.primaryBuyerId.isBlank()) {
+                        "A single payer covers the full amount"
+                    } else {
+                        if (primaryPayerLabel.equals("You", ignoreCase = true)) {
+                            "You pay the full amount"
+                        } else {
+                            "$primaryPayerLabel pays the full amount"
+                        }
+                    },
                     color = colorScheme.onPrimaryContainer,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
@@ -457,9 +511,9 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                 ) {
                     Checkbox(
                         checked = selected,
-                        onCheckedChange = { checked -> 
-                            viewModel.onPayerToggled(payer, checked) 
-                            
+                        onCheckedChange = { checked -> if (canEditExpense) {
+                            viewModel.onPayerToggled(payer, checked)
+
                             val newSelectedPayers = if (checked) uiState.selectedPayerIds + payer else uiState.selectedPayerIds - payer
                             if (newSelectedPayers.isNotEmpty() && totalExpenseAmount > 0) {
                                 val splitAmount = totalExpenseAmount / newSelectedPayers.size
@@ -468,7 +522,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                                     viewModel.onPayerAmountChanged(pId, formattedSplit)
                                 }
                             }
-                        }
+                        } }
                     )
                     Text(
                         text = labelForMember(payer),
@@ -495,7 +549,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                                 }
                             } 
                         },
-                        enabled = selected,
+                        enabled = canEditExpense && selected,
                         placeholder = { Text("0.00") },
                         modifier = Modifier
                             .weight(0.7f)
@@ -550,7 +604,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                     .weight(1f)
                     .clip(RoundedCornerShape(10.dp))
                     .background(if (uiState.splitMode == SplitMode.ALL_MEMBERS) colorScheme.surface else Color.Transparent)
-                    .clickable { viewModel.onSplitModeChanged(SplitMode.ALL_MEMBERS) }
+                    .clickable(enabled = canEditExpense) { viewModel.onSplitModeChanged(SplitMode.ALL_MEMBERS) }
                     .padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -566,7 +620,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                     .weight(1f)
                     .clip(RoundedCornerShape(10.dp))
                     .background(if (uiState.splitMode == SplitMode.SELECTED_MEMBERS) colorScheme.surface else Color.Transparent)
-                    .clickable { viewModel.onSplitModeChanged(SplitMode.SELECTED_MEMBERS) }
+                    .clickable(enabled = canEditExpense) { viewModel.onSplitModeChanged(SplitMode.SELECTED_MEMBERS) }
                     .padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -600,8 +654,8 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
                         ) {
                             Checkbox(
                                 checked = uiState.selectedSplitMemberIds.contains(memberId),
-                                enabled = !isPayer,
-                                onCheckedChange = { checked -> viewModel.onSplitMemberToggled(memberId, checked) }
+                                enabled = canEditExpense && !isPayer,
+                                onCheckedChange = { checked -> if (canEditExpense) viewModel.onSplitMemberToggled(memberId, checked) }
                             )
                             Text(
                                 text = if (isPayer) "${labelForMember(memberId)} (Payer)" else labelForMember(memberId),
@@ -644,7 +698,7 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
             onClick = { viewModel.submitExpense(onSuccess = onNavigateBack) },
             colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primary),
             shape = RoundedCornerShape(12.dp),
-            enabled = !uiState.isLoading,
+            enabled = canEditExpense && !uiState.isLoading,
             modifier = Modifier.fillMaxWidth().height(52.dp)
         ) {
             val actionText = if (uiState.isEditing) "Save Changes" else "Create Expense"

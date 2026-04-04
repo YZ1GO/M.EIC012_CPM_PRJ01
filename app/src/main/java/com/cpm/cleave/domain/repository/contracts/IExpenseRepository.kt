@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.Flow
 
 interface IExpenseRepository {
     suspend fun getExpensesByGroup(groupId: String): Result<List<Expense>>
+    suspend fun getExpenseById(expenseId: String): Result<Expense?>
     suspend fun getExpenseSharesByGroup(groupId: String): Result<Map<String, List<ExpenseShare>>>
     fun observeExpensesByGroup(groupId: String): Flow<List<Expense>>
     fun observeDebtsByGroup(groupId: String): Flow<List<Debt>>

@@ -211,6 +211,10 @@ class ExpenseRepositoryImpl(
         }
     }
 
+    override suspend fun getExpenseById(expenseId: String): Result<Expense?> {
+        return runCatching { cache.getExpenseById(expenseId) }
+    }
+
     override fun observeDebtsByGroup(groupId: String): Flow<List<Debt>> = flow {
         runCatching { recomputeAndPersistDebts(groupId) }
         emitAll(cache.observeDebtsByGroup(groupId))
@@ -404,8 +408,34 @@ class ExpenseRepositoryImpl(
         receiptItems: List<ReceiptItem>
     ): Result<Unit> {
         return try {
-            val existingExpense = cache.getExpenseById(expenseId)
-                ?: return Result.failure(IllegalArgumentException("Expense not found"))
+            var existingExpense = cache.getExpenseById(expenseId)
+
+            if (existingExpense == null) {
+                repeat(4) {
+                    delay(100)
+                    existingExpense = cache.getExpenseById(expenseId)
+                    if (existingExpense != null) return@repeat
+                }
+            }
+
+            if (existingExpense == null && connectivityStatus.isNetworkAvailable()) {
+                runCatching {
+                    val remotePayload = withTimeoutOrNull(3000L) { fetchExpensesFromRemote(groupId) }
+                    if (remotePayload != null) {
+                        val (remoteExpenses, sharesByExpenseId) = remotePayload
+                        cache.upsertExpensesForGroup(
+                            groupId = groupId,
+                            expenses = remoteExpenses,
+                            sharesByExpenseId = sharesByExpenseId
+                        )
+                        existingExpense = cache.getExpenseById(expenseId)
+                    }
+                }
+            }
+
+            if (existingExpense == null) {
+                return Result.failure(IllegalArgumentException("Expense not found"))
+            }
 
             val normalizedContributions = payerContributions
                 .filterValues { it > 0.0 }
@@ -415,6 +445,7 @@ class ExpenseRepositoryImpl(
 
             val now = System.currentTimeMillis()
             val mutationTimestamp = now
+            val preservedDate = existingExpense!!.date
 
             val receiptImagePath = if (receiptImageBytes != null) {
                 val localPath = persistReceiptLocally(expenseId, receiptImageBytes)
@@ -436,14 +467,14 @@ class ExpenseRepositoryImpl(
                     }
                 }
             } else {
-                existingExpense.imagePath
+                existingExpense!!.imagePath
             }
 
             cache.insertExpenseWithSplit(
                 expenseId = expenseId,
                 amount = amount,
                 description = description,
-                date = now,
+                date = preservedDate,
                 groupId = groupId,
                 payerContributions = normalizedContributions,
                 memberIds = splitMemberIds,
@@ -455,7 +486,7 @@ class ExpenseRepositoryImpl(
             val pendingPayloadJson = buildPendingExpensePayloadJson(
                 amount = amount,
                 description = description,
-                date = now,
+                date = preservedDate,
                 mutationTimestamp = mutationTimestamp,
                 splitMemberIds = splitMemberIds,
                 payerContributions = normalizedContributions,
@@ -478,7 +509,7 @@ class ExpenseRepositoryImpl(
                         groupId = groupId,
                         amount = amount,
                         description = description,
-                        date = now,
+                        date = preservedDate,
                         mutationTimestamp = mutationTimestamp,
                         splitMemberIds = splitMemberIds,
                         payerContributions = normalizedContributions,

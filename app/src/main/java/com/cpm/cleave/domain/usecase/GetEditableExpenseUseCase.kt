@@ -12,13 +12,15 @@ class GetEditableExpenseUseCase(
     private val expenseRepository: IExpenseRepository
 ) {
     suspend fun execute(groupId: String, expenseId: String): Result<EditableExpenseData> {
-        val expenses = expenseRepository.getExpensesByGroup(groupId)
-            .getOrElse { return Result.failure(it) }
-        val expense = expenses.firstOrNull { it.id == expenseId }
+        val expense = expenseRepository.getExpenseById(expenseId)
+            .getOrElse { null }
+            ?: expenseRepository.getExpensesByGroup(groupId)
+                .getOrElse { return Result.failure(it) }
+                .firstOrNull { it.id == expenseId }
             ?: return Result.failure(IllegalArgumentException("Expense not found"))
 
         val sharesByExpenseId = expenseRepository.getExpenseSharesByGroup(groupId)
-            .getOrElse { return Result.failure(it) }
+            .getOrElse { emptyMap() }
 
         val splitMemberIds = sharesByExpenseId[expenseId]
             .orEmpty()
