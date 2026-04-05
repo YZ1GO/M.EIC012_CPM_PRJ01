@@ -255,7 +255,27 @@ class ExpenseRepositoryImpl(
             val isOnline = connectivityStatus.isNetworkAvailable()
 
             if (!isPendingLocalOnly && isOnline) {
-                syncExpenseDeletionToRemote(groupId = groupId, expenseId = expenseId)
+                // LWW: Check if remote is newer before deleting
+                val remoteVersion = runCatching {
+                    withTimeoutOrNull(2500L) {
+                        fetchRemoteExpenseVersion(
+                            groupId = groupId,
+                            expenseId = expenseId
+                        )
+                    }
+                }.getOrNull()
+
+                val now = System.currentTimeMillis()
+                val remoteUpdatedAt = remoteVersion?.updatedAt
+                val isRemoteNewer = 
+                    remoteVersion?.exists == true &&
+                    remoteUpdatedAt != null &&
+                    remoteUpdatedAt > now
+
+                // If remote is newer, skip deletion (LWW - keep remote version)
+                if (!isRemoteNewer) {
+                    syncExpenseDeletionToRemote(groupId = groupId, expenseId = expenseId)
+                }
             } else if (!isPendingLocalOnly && !isOnline) {
                 pendingSyncStore.addPendingExpenseDeletion(groupId, expenseId)
             }
@@ -507,6 +527,30 @@ class ExpenseRepositoryImpl(
             localExpenseRefreshEvents.tryEmit(groupId)
 
             if (!connectivityStatus.isNetworkAvailable()) {
+                pendingSyncStore.addPendingExpenseSync(groupId, expenseId)
+                pendingSyncStore.setPendingExpenseSyncPayload(groupId, expenseId, pendingPayloadJson)
+                return Result.success(Unit)
+            }
+
+            // LWW conflict detection: check if remote version is newer
+            val remoteVersion = runCatching {
+                withTimeoutOrNull(2500L) {
+                    fetchRemoteExpenseVersion(
+                        groupId = groupId,
+                        expenseId = expenseId
+                    )
+                }
+            }.getOrNull()
+
+            val remoteUpdatedAt = remoteVersion?.updatedAt
+            val hasRemoteNewerState =
+                mutationTimestamp > 0L &&
+                    remoteVersion?.exists == true &&
+                    remoteUpdatedAt != null &&
+                    remoteUpdatedAt > mutationTimestamp
+
+            // If remote is newer, keep pending without overwriting (LWW)
+            if (hasRemoteNewerState) {
                 pendingSyncStore.addPendingExpenseSync(groupId, expenseId)
                 pendingSyncStore.setPendingExpenseSyncPayload(groupId, expenseId, pendingPayloadJson)
                 return Result.success(Unit)
