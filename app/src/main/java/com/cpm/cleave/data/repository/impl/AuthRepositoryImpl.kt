@@ -47,13 +47,16 @@ class AuthRepositoryImpl(
                         anonymousName = resolvedAnonymousName,
                         anonymousPhotoUrl = firebaseUser.photoUrl?.toString()
                     )
-                    ensureUserDocument(
-                        uid = activatedAnonymous.id,
-                        name = activatedAnonymous.name,
-                        email = null,
-                        isAnonymous = true,
-                        photoUrl = activatedAnonymous.photoUrl
-                    )
+                    // Keep local auth usable offline even when Firestore is unreachable.
+                    runCatching {
+                        ensureUserDocument(
+                            uid = activatedAnonymous.id,
+                            name = activatedAnonymous.name,
+                            email = null,
+                            isAnonymous = true,
+                            photoUrl = activatedAnonymous.photoUrl
+                        )
+                    }
                     Result.success(activatedAnonymous)
                 } else {
                     // Always reactivate the authenticated registered user in local session state.

@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.runningFold
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.min
 
 data class DebtReason(
@@ -68,7 +69,9 @@ class GetGroupDetailsUseCase(
             sharesByExpenseId = sharesByExpenseId
         )
 
-        val currentUserId = authRepository.getCurrentUser().getOrNull()?.id
+        val currentUserId = withTimeoutOrNull(1200L) {
+            authRepository.getCurrentUser().getOrNull()?.id
+        }
         val (totalYouOwe, totalOwedToYou) = calculateDebtTotals(
             debts = debts,
             currentUserId = currentUserId
@@ -118,7 +121,8 @@ class GetGroupDetailsUseCase(
             val group: Group? = null,
             val expenses: List<Expense> = emptyList(),
             val debts: List<Debt> = emptyList(),
-            val sharesByExpenseId: Map<String, List<ExpenseShare>> = emptyMap()
+            val sharesByExpenseId: Map<String, List<ExpenseShare>> = emptyMap(),
+            val currentUserId: String? = null
         )
 
         return combine(groupsFlow, expensesFlow, debtsFlow) { groups, observedExpenses, observedDebts ->
@@ -163,7 +167,10 @@ class GetGroupDetailsUseCase(
                     group = freshGroup,
                     expenses = stableExpenses,
                     debts = stableDebts,
-                    sharesByExpenseId = stableShares
+                    sharesByExpenseId = stableShares,
+                    currentUserId = withTimeoutOrNull(1200L) {
+                        authRepository.getCurrentUser().getOrNull()?.id
+                    } ?: previous.currentUserId
                 )
             }
             .drop(1)
@@ -185,7 +192,7 @@ class GetGroupDetailsUseCase(
                         "mapped groupId=$groupId expenses=${state.expenses.size} debts=${state.debts.size} debtsWithReason=$debtsWithReasonCount debtsWithoutReasons=$debtsWithoutReasonsCount"
                     )
 
-                    val currentUserId = authRepository.getCurrentUser().getOrNull()?.id
+                    val currentUserId = state.currentUserId
                     val (totalYouOwe, totalOwedToYou) = calculateDebtTotals(
                         debts = state.debts,
                         currentUserId = currentUserId
@@ -311,7 +318,9 @@ class GetGroupDetailsUseCase(
                 val normalizedUserId = normalizeUserId(userId)
                 when {
                     currentUserId != null && normalizedUserId == normalizeUserId(currentUserId) -> "You"
-                    else -> authRepository.getUserDisplayName(userId).getOrNull()
+                    else -> withTimeoutOrNull(700L) {
+                        authRepository.getUserDisplayName(userId).getOrNull()
+                    }
                         ?.takeIf { it.isNotBlank() }
                         ?: fallbackDisplayName(normalizedUserId)
                 }
@@ -339,8 +348,9 @@ class GetGroupDetailsUseCase(
         return ids
             .filter { it.isNotBlank() }
             .mapNotNull { userId ->
-                authRepository.getUserPhotoUrl(userId)
-                    .getOrNull()
+                withTimeoutOrNull(120L) {
+                    authRepository.getUserPhotoUrl(userId).getOrNull()
+                }
                     ?.takeIf { it.isNotBlank() }
                     ?.let { url -> userId to url }
             }
@@ -368,8 +378,9 @@ class GetGroupDetailsUseCase(
         return ids
             .filter { it.isNotBlank() }
             .mapNotNull { userId ->
-                authRepository.getUserLastSeen(userId)
-                    .getOrNull()
+                withTimeoutOrNull(120L) {
+                    authRepository.getUserLastSeen(userId).getOrNull()
+                }
                     ?.let { lastSeen -> userId to lastSeen }
             }
             .toMap()

@@ -2,6 +2,7 @@ package com.cpm.cleave.domain.usecase
 
 import com.cpm.cleave.domain.repository.contracts.IAuthRepository
 import com.cpm.cleave.model.Debt
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 
 class RequestSettleDebtUseCase(
@@ -34,10 +35,12 @@ class RequestSettleDebtUseCase(
     }
 
     private suspend fun resolveDisplayName(userId: String): String {
-        val resolved = authRepository.getUserDisplayName(userId)
-            .getOrNull()
-            ?.trim()
-            .orEmpty()
+        val resolved = withTimeoutOrNull(200L) {
+            authRepository.getUserDisplayName(userId)
+                .getOrNull()
+                ?.trim()
+                .orEmpty()
+        }.orEmpty()
         if (resolved.isNotBlank()) return resolved
 
         val normalizedId = userId.trim().substringAfterLast('/')

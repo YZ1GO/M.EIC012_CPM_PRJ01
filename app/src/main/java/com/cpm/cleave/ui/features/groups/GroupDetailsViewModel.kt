@@ -38,6 +38,7 @@ class GroupDetailsViewModel(
 
     private var hasAppliedInitialSnapshot = false
     private var firstObserveSuccessAtMs: Long? = null
+    private val recentDebtPaymentRequests = mutableMapOf<String, Long>()
 
     private val _uiState = MutableStateFlow(GroupDetailsUiState())
     val uiState: StateFlow<GroupDetailsUiState> = _uiState.asStateFlow()
@@ -137,19 +138,17 @@ class GroupDetailsViewModel(
                                 } else {
                                     it.expenses
                                 }
-                                val stableDebts = if (data.debts.isNotEmpty() || stableExpenses.isEmpty()) {
-                                    data.debts
-                                } else {
-                                    it.debts
-                                }
-                                val stableDebtsWithReason = if (data.debtsWithReason.isNotEmpty() || stableDebts.isEmpty()) {
-                                    data.debtsWithReason
-                                } else {
-                                    it.debtsWithReason
-                                }
+                                // Trust newest debt snapshot, including valid transitions to no debts after settlement.
+                                val stableDebts = data.debts
+                                val stableDebtsWithReason = data.debtsWithReason
                                 val stableCurrentUserId = data.currentUserId ?: it.currentUserId
                                 val stableTotalYouOwe = if (data.currentUserId != null) data.totalYouOwe else it.totalYouOwe
                                 val stableTotalOwedToYou = if (data.currentUserId != null) data.totalOwedToYou else it.totalOwedToYou
+                                val stableUserDisplayNames = mergeDisplayNames(
+                                    previous = it.userDisplayNames,
+                                    incoming = data.userDisplayNames,
+                                    currentUserId = stableCurrentUserId
+                                )
 
                                 val nextState = it.copy(
                                     isLoading = false,
@@ -160,7 +159,7 @@ class GroupDetailsViewModel(
                                     debtsWithReason = stableDebtsWithReason,
                                     totalYouOwe = stableTotalYouOwe,
                                     totalOwedToYou = stableTotalOwedToYou,
-                                    userDisplayNames = data.userDisplayNames,
+                                    userDisplayNames = stableUserDisplayNames,
                                     userPhotoUrls = data.userPhotoUrls,
                                     userLastSeen = data.userLastSeen,
                                     canDeleteGroup = !data.group.ownerId.isNullOrBlank() && data.group.ownerId == stableCurrentUserId,
@@ -225,19 +224,17 @@ class GroupDetailsViewModel(
                         } else {
                             it.expenses
                         }
-                        val stableDebts = if (data.debts.isNotEmpty() || stableExpenses.isEmpty()) {
-                            data.debts
-                        } else {
-                            it.debts
-                        }
-                        val stableDebtsWithReason = if (data.debtsWithReason.isNotEmpty() || stableDebts.isEmpty()) {
-                            data.debtsWithReason
-                        } else {
-                            it.debtsWithReason
-                        }
+                        // Trust newest debt snapshot, including valid transitions to no debts after settlement.
+                        val stableDebts = data.debts
+                        val stableDebtsWithReason = data.debtsWithReason
                         val stableCurrentUserId = data.currentUserId ?: it.currentUserId
                         val stableTotalYouOwe = if (data.currentUserId != null) data.totalYouOwe else it.totalYouOwe
                         val stableTotalOwedToYou = if (data.currentUserId != null) data.totalOwedToYou else it.totalOwedToYou
+                        val stableUserDisplayNames = mergeDisplayNames(
+                            previous = it.userDisplayNames,
+                            incoming = data.userDisplayNames,
+                            currentUserId = stableCurrentUserId
+                        )
                         val nextState = it.copy(
                             isLoading = false,
                             currentUserId = stableCurrentUserId,
@@ -247,7 +244,7 @@ class GroupDetailsViewModel(
                             debtsWithReason = stableDebtsWithReason,
                             totalYouOwe = stableTotalYouOwe,
                             totalOwedToYou = stableTotalOwedToYou,
-                            userDisplayNames = data.userDisplayNames,
+                            userDisplayNames = stableUserDisplayNames,
                             userPhotoUrls = data.userPhotoUrls,
                             userLastSeen = data.userLastSeen,
                             canDeleteGroup = !data.group.ownerId.isNullOrBlank() && data.group.ownerId == stableCurrentUserId,
@@ -279,11 +276,48 @@ class GroupDetailsViewModel(
             debtsWithReason = state.debtsWithReason,
             totalYouOwe = state.totalYouOwe,
             totalOwedToYou = state.totalOwedToYou,
-            userDisplayNames = data.userDisplayNames,
+            userDisplayNames = state.userDisplayNames,
             userPhotoUrls = data.userPhotoUrls,
             userLastSeen = data.userLastSeen,
             currentUserId = state.currentUserId
         )
+    }
+
+    private fun mergeDisplayNames(
+        previous: Map<String, String>,
+        incoming: Map<String, String>,
+        currentUserId: String?
+    ): Map<String, String> {
+        val merged = previous.toMutableMap()
+
+        incoming.forEach { (userId, incomingName) ->
+            val previousName = previous[userId].orEmpty()
+            val normalizedUserId = normalizeIdentity(userId)
+            val normalizedCurrentUserId = currentUserId?.let(::normalizeIdentity).orEmpty()
+
+            val finalName = when {
+                normalizedCurrentUserId.isNotBlank() && normalizedUserId == normalizedCurrentUserId -> "You"
+                incomingName.isBlank() -> previousName
+                isGenericDisplayName(incomingName) && previousName.isNotBlank() && !isGenericDisplayName(previousName) -> previousName
+                else -> incomingName
+            }
+
+            if (finalName.isNotBlank()) {
+                merged[userId] = finalName
+            }
+        }
+
+        return merged
+    }
+
+    private fun isGenericDisplayName(value: String): Boolean {
+        val normalized = value.trim()
+        return normalized.equals("User", ignoreCase = true) ||
+            normalized.equals("Guest", ignoreCase = true)
+    }
+
+    private fun normalizeIdentity(value: String): String {
+        return value.trim().substringAfterLast('/')
     }
 
     fun onDebtClicked(debt: Debt) {
@@ -338,6 +372,15 @@ class GroupDetailsViewModel(
             return
         }
 
+        val paymentRequestKey = buildDebtPaymentRequestKey(selectedDebt, amount)
+        val now = System.currentTimeMillis()
+        // Prevent accidental duplicate submissions of the same payment while offline sync catches up.
+        if (recentDebtPaymentRequests[paymentRequestKey]?.let { now - it < 20_000L } == true) {
+            _uiState.update { it.copy(errorMessage = "Payment already submitted. Please wait a moment.") }
+            return
+        }
+        recentDebtPaymentRequests[paymentRequestKey] = now
+
         viewModelScope.launch {
             _uiState.update { it.copy(isSettlingDebt = true, errorMessage = null) }
 
@@ -357,6 +400,7 @@ class GroupDetailsViewModel(
                     refreshGroupData()
                 }
                 .onFailure { error ->
+                    recentDebtPaymentRequests.remove(paymentRequestKey)
                     _uiState.update {
                         it.copy(
                             isSettlingDebt = false,
@@ -365,6 +409,13 @@ class GroupDetailsViewModel(
                     }
                 }
         }
+    }
+
+    private fun buildDebtPaymentRequestKey(debt: Debt, amount: Double): String {
+        val from = normalizeIdentity(debt.fromUser)
+        val to = normalizeIdentity(debt.toUser)
+        val cents = kotlin.math.round(amount * 100.0).toLong()
+        return "$groupId|$from|$to|$cents"
     }
 
     fun onDeleteGroupClicked(onSuccess: () -> Unit) {

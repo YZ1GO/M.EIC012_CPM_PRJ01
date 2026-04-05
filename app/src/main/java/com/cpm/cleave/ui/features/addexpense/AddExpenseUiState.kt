@@ -13,6 +13,7 @@ enum class BuyerMode {
 }
 
 data class AddExpenseUiState(
+    val currentUserId: String? = null,
     val isEditing: Boolean = false,
     val editingExpenseId: String? = null,
     val canEditExpense: Boolean = true,

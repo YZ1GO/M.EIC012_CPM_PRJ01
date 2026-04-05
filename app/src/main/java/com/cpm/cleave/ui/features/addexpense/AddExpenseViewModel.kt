@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 
 class AddExpenseViewModel(
@@ -52,11 +53,12 @@ class AddExpenseViewModel(
 
     private fun loadEditData() {
         viewModelScope.launch {
-            val expenseDeferred = async { loadExpenseDraft() }
-            val membersDeferred = async { loadGroupMembersForEditing() }
+            val expenseDeferred = async {
+                withTimeoutOrNull(8000L) { loadExpenseDraft() }
+                    ?: Result.failure(IllegalStateException("Timed out while loading expense details"))
+            }
 
             val expenseResult = expenseDeferred.await()
-            val membersResult = membersDeferred.await()
 
             if (expenseResult.isFailure) {
                 _uiState.update {
@@ -68,33 +70,44 @@ class AddExpenseViewModel(
                 return@launch
             }
 
+            // Do not block edit actions on member/name enrichment when offline.
+            _uiState.update { it.copy(isLoading = false, errorMessage = null) }
+
+            val membersResult = withTimeoutOrNull(8000L) { loadGroupMembersForEditing() }
+                ?: Result.failure(IllegalStateException("Timed out while loading group members"))
+
             if (membersResult.isFailure) {
                 _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        errorMessage = membersResult.exceptionOrNull()?.message ?: "Could not load group members"
-                    )
+                    it.copy(errorMessage = membersResult.exceptionOrNull()?.message ?: "Could not load group members")
                 }
-                return@launch
             }
-
-            _uiState.update { it.copy(isLoading = false, errorMessage = null) }
         }
     }
 
     private fun loadGroupMembers() {
         viewModelScope.launch {
-            val currentUserId = authRepository.getCurrentUser().getOrNull()?.id.orEmpty()
-            getAddExpenseMembersUseCase.execute(groupId)
+            val currentUserId = withTimeoutOrNull(4000L) {
+                authRepository.getCurrentUser().getOrNull()?.id.orEmpty()
+            }.orEmpty()
+
+            val membersResult = withTimeoutOrNull(5000L) {
+                getAddExpenseMembersUseCase.execute(groupId)
+            } ?: Result.failure(IllegalStateException("Timed out while loading group members"))
+
+            membersResult
                 .onSuccess { members ->
-                    val memberDisplayNames = members.associateWith { memberId ->
+                    val resolvedDisplayNames = members.associateWith { memberId ->
                         when {
-                            memberId == currentUserId -> "You"
-                            else -> authRepository.getUserDisplayName(memberId).getOrNull()
+                            currentUserId.isNotBlank() && normalizeMemberId(memberId) == normalizeMemberId(currentUserId) -> "You"
+                            else -> withTimeoutOrNull(1200L) {
+                                authRepository.getUserDisplayName(memberId).getOrNull()
+                            }
                                 ?.takeIf { it.isNotBlank() }
+                                ?: _uiState.value.memberDisplayNames[memberId]
                                 ?: memberId
                         }
                     }
+                    val memberDisplayNames = resolvedDisplayNames.withNormalizedAliases()
                     _uiState.update {
                         val updatedBuyerMode = if (editingExpenseId.isNullOrBlank()) {
                             BuyerMode.SINGLE_BUYER
@@ -103,7 +116,7 @@ class AddExpenseViewModel(
                         }
                         val updatedPrimaryBuyerId = if (editingExpenseId.isNullOrBlank()) {
                             when {
-                                currentUserId.isNotBlank() && members.contains(currentUserId) -> currentUserId
+                                currentUserId.isNotBlank() -> resolveMemberId(currentUserId, members).orEmpty()
                                 else -> members.firstOrNull().orEmpty()
                             }
                         } else {
@@ -121,6 +134,7 @@ class AddExpenseViewModel(
                         }
 
                         it.copy(
+                            currentUserId = currentUserId,
                             isEditing = !editingExpenseId.isNullOrBlank(),
                             editingExpenseId = editingExpenseId,
                             availablePayers = members,
@@ -142,23 +156,38 @@ class AddExpenseViewModel(
     }
 
     private suspend fun loadGroupMembersForEditing(): Result<Unit> {
-        val currentUserId = authRepository.getCurrentUser().getOrNull()?.id.orEmpty()
-        return getAddExpenseMembersUseCase.execute(groupId)
+        val currentUserId = withTimeoutOrNull(4000L) {
+            authRepository.getCurrentUser().getOrNull()?.id.orEmpty()
+        }.orEmpty()
+
+        val membersResult = withTimeoutOrNull(5000L) {
+            getAddExpenseMembersUseCase.execute(groupId)
+        } ?: Result.failure(IllegalStateException("Timed out while loading group members"))
+
+        return membersResult
             .onSuccess { members ->
-                val memberDisplayNames = members.associateWith { memberId ->
+                val resolvedDisplayNames = members.associateWith { memberId ->
                     when {
-                        memberId == currentUserId -> "You"
-                        else -> authRepository.getUserDisplayName(memberId).getOrNull()
+                        currentUserId.isNotBlank() && normalizeMemberId(memberId) == normalizeMemberId(currentUserId) -> "You"
+                        else -> withTimeoutOrNull(1200L) {
+                            authRepository.getUserDisplayName(memberId).getOrNull()
+                        }
                             ?.takeIf { it.isNotBlank() }
+                            ?: _uiState.value.memberDisplayNames[memberId]
                             ?: memberId
                     }
                 }
+                val memberDisplayNames = resolvedDisplayNames.withNormalizedAliases()
 
                 _uiState.update { current ->
+                    val canonicalSelection = current.selectedSplitMemberIds
+                        .mapNotNull { selectedId -> resolveMemberId(selectedId, members) }
+                        .toSet()
+
                     val normalizedSplitSelection = when {
-                        current.selectedSplitMemberIds.isEmpty() -> members.toSet()
-                        current.selectedSplitMemberIds == members.toSet() -> members.toSet()
-                        else -> current.selectedSplitMemberIds
+                        canonicalSelection.isEmpty() -> members.toSet()
+                        canonicalSelection == members.toSet() -> members.toSet()
+                        else -> canonicalSelection
                     }
                     val normalizedSplitMode = if (normalizedSplitSelection == members.toSet()) {
                         SplitMode.ALL_MEMBERS
@@ -167,6 +196,7 @@ class AddExpenseViewModel(
                     }
 
                     current.copy(
+                        currentUserId = if (currentUserId.isBlank()) current.currentUserId else currentUserId,
                         availablePayers = members,
                         memberDisplayNames = memberDisplayNames,
                         splitMode = normalizedSplitMode,
@@ -249,17 +279,46 @@ class AddExpenseViewModel(
         val splitSelection = splitMemberIds
 
         _uiState.update {
+            val availableMembers = it.availablePayers.toSet()
+            val hasMemberContext = availableMembers.isNotEmpty()
+            val canonicalPrimaryPayer = if (hasMemberContext) {
+                resolveMemberId(primaryPayer, it.availablePayers).orEmpty()
+            } else {
+                primaryPayer
+            }
+            val canonicalSelectedPayers = if (hasMemberContext) {
+                canonicalizeMemberIdSet(selectedPayers, it.availablePayers)
+            } else {
+                selectedPayers
+            }
+            val canonicalContributionMap = if (hasMemberContext) {
+                canonicalizeMemberKeyMap(contributionMap, it.availablePayers)
+            } else {
+                contributionMap
+            }
+
+            val isAllMembersSplit = if (!hasMemberContext) {
+                true
+            } else {
+                splitSelection.isEmpty() || splitSelection == availableMembers
+            }
+            val resolvedSplitSelection = when {
+                !hasMemberContext -> splitSelection
+                isAllMembersSplit -> availableMembers
+                else -> splitSelection
+            }
+
             it.copy(
                 isEditing = true,
                 editingExpenseId = expense.id,
                 amountInput = formatAmountInput(expense.amount),
                 description = expense.description,
-                buyerMode = if (selectedPayers.size <= 1) BuyerMode.SINGLE_BUYER else BuyerMode.SELECT_BUYERS,
-                primaryBuyerId = primaryPayer,
-                selectedPayerIds = selectedPayers,
-                payerAmountInputs = contributionMap,
-                splitMode = if (splitSelection.isEmpty()) SplitMode.ALL_MEMBERS else SplitMode.SELECTED_MEMBERS,
-                selectedSplitMemberIds = splitSelection,
+                buyerMode = if (canonicalSelectedPayers.size <= 1) BuyerMode.SINGLE_BUYER else BuyerMode.SELECT_BUYERS,
+                primaryBuyerId = canonicalPrimaryPayer,
+                selectedPayerIds = canonicalSelectedPayers,
+                payerAmountInputs = canonicalContributionMap,
+                splitMode = if (isAllMembersSplit) SplitMode.ALL_MEMBERS else SplitMode.SELECTED_MEMBERS,
+                selectedSplitMemberIds = resolvedSplitSelection,
                 hasReceiptImage = !expense.imagePath.isNullOrBlank(),
                 receiptImagePath = expense.imagePath,
                 detectedReceiptItems = expense.receiptItems,
@@ -503,21 +562,24 @@ class AddExpenseViewModel(
     fun onBuyerModeChanged(mode: BuyerMode) {
         if (!isExpenseEditable()) return
         _uiState.update { current ->
-            val primary = current.primaryBuyerId.ifBlank { current.availablePayers.firstOrNull().orEmpty() }
+            val canonicalPrimary = resolveMemberId(current.primaryBuyerId, current.availablePayers)
+                ?: current.availablePayers.firstOrNull().orEmpty()
+            val canonicalSelectedPayers = canonicalizeMemberIdSet(current.selectedPayerIds, current.availablePayers)
+            val canonicalPayerAmounts = canonicalizeMemberKeyMap(current.payerAmountInputs, current.availablePayers)
             when (mode) {
                 BuyerMode.SINGLE_BUYER -> current.copy(
                     buyerMode = mode,
-                    primaryBuyerId = primary,
-                    selectedPayerIds = if (primary.isBlank()) emptySet() else setOf(primary),
-                    payerAmountInputs = if (primary.isBlank()) emptyMap() else mapOf(primary to current.amountInput),
-                    selectedSplitMemberIds = current.selectedSplitMemberIds + primary,
+                    primaryBuyerId = canonicalPrimary,
+                    selectedPayerIds = if (canonicalPrimary.isBlank()) emptySet() else setOf(canonicalPrimary),
+                    payerAmountInputs = if (canonicalPrimary.isBlank()) emptyMap() else mapOf(canonicalPrimary to current.amountInput),
+                    selectedSplitMemberIds = if (canonicalPrimary.isBlank()) current.selectedSplitMemberIds else current.selectedSplitMemberIds + canonicalPrimary,
                     errorMessage = null
                 )
                 BuyerMode.SELECT_BUYERS -> {
-                    val selected = if (current.selectedPayerIds.isNotEmpty()) current.selectedPayerIds else {
-                        if (primary.isBlank()) emptySet() else setOf(primary)
+                    val selected = if (canonicalSelectedPayers.isNotEmpty()) canonicalSelectedPayers else {
+                        if (canonicalPrimary.isBlank()) emptySet() else setOf(canonicalPrimary)
                     }
-                    val updatedAmounts = current.payerAmountInputs.toMutableMap().apply {
+                    val updatedAmounts = canonicalPayerAmounts.toMutableMap().apply {
                         if (selected.size == 1) {
                             val onlyPayerId = selected.first()
                             putIfAbsent(onlyPayerId, current.amountInput)
@@ -540,25 +602,29 @@ class AddExpenseViewModel(
         _uiState.update { current ->
             if (current.buyerMode == BuyerMode.SINGLE_BUYER) return@update current
 
-            val selectedPayers = current.selectedPayerIds.toMutableSet().apply {
-                if (checked) add(value) else remove(value)
+            val canonicalValue = resolveMemberId(value, current.availablePayers) ?: value
+            val canonicalSelected = canonicalizeMemberIdSet(current.selectedPayerIds, current.availablePayers)
+            val canonicalPayerAmounts = canonicalizeMemberKeyMap(current.payerAmountInputs, current.availablePayers)
+
+            val selectedPayers = canonicalSelected.toMutableSet().apply {
+                if (checked) add(canonicalValue) else remove(canonicalValue)
             }
 
-            val payerAmounts = current.payerAmountInputs.toMutableMap().apply {
+            val payerAmounts = canonicalPayerAmounts.toMutableMap().apply {
                 if (checked) {
-                    if (!containsKey(value)) {
+                    if (!containsKey(canonicalValue)) {
                         val defaultAmount = if (selectedPayers.size == 1) current.amountInput else ""
-                        put(value, defaultAmount)
+                        put(canonicalValue, defaultAmount)
                     }
                 } else {
-                    remove(value)
+                    remove(canonicalValue)
                 }
             }
 
             current.copy(
                 selectedPayerIds = selectedPayers,
                 payerAmountInputs = payerAmounts,
-                selectedSplitMemberIds = if (checked) current.selectedSplitMemberIds + value else current.selectedSplitMemberIds,
+                selectedSplitMemberIds = if (checked) current.selectedSplitMemberIds + canonicalValue else current.selectedSplitMemberIds,
                 errorMessage = null
             )
         }
@@ -579,12 +645,15 @@ class AddExpenseViewModel(
     fun onSplitModeChanged(mode: SplitMode) {
         if (!isExpenseEditable()) return
         _uiState.update { current ->
+            val canonicalPrimary = resolveMemberId(current.primaryBuyerId, current.availablePayers)
+                ?: current.primaryBuyerId
+            val canonicalSelectedPayers = canonicalizeMemberIdSet(current.selectedPayerIds, current.availablePayers)
             val selected = if (mode == SplitMode.ALL_MEMBERS) {
                 current.availablePayers.toSet()
             } else {
                 val requiredPayers = when (current.buyerMode) {
-                    BuyerMode.SINGLE_BUYER -> setOf(current.primaryBuyerId).filter { it.isNotBlank() }.toSet()
-                    BuyerMode.SELECT_BUYERS -> current.selectedPayerIds
+                    BuyerMode.SINGLE_BUYER -> setOf(canonicalPrimary).filter { it.isNotBlank() }.toSet()
+                    BuyerMode.SELECT_BUYERS -> canonicalSelectedPayers
                 }
                 (current.selectedSplitMemberIds.ifEmpty { current.availablePayers.toSet() } + requiredPayers)
             }
@@ -619,18 +688,22 @@ class AddExpenseViewModel(
         }
 
         viewModelScope.launch {
-            val freshMembersResult = getAddExpenseMembersUseCase.execute(groupId)
-            val freshMembers = freshMembersResult.getOrElse { error ->
-                _uiState.update { it.copy(isLoading = false, errorMessage = error.message ?: "Group not found") }
-                return@launch
+            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+
+            val freshMembers = withTimeoutOrNull(3000L) {
+                getAddExpenseMembersUseCase.execute(groupId).getOrNull()
+            }.orEmpty()
+            val membersForValidation = if (state.availablePayers.isNotEmpty()) {
+                state.availablePayers
+            } else {
+                freshMembers
             }
 
-            val currentUserId = authRepository.getCurrentUser().getOrNull()?.id.orEmpty()
-            if (currentUserId.isBlank() || currentUserId !in freshMembers) {
+            if (membersForValidation.isEmpty()) {
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        errorMessage = "This group is no longer available."
+                        errorMessage = "Group members are unavailable. Please open the group again."
                     )
                 }
                 return@launch
@@ -639,63 +712,88 @@ class AddExpenseViewModel(
             val amount = state.amountInput.toDoubleOrNull()
 
             if (amount == null || amount <= 0.0) {
-                _uiState.update { it.copy(errorMessage = "Enter a valid amount") }
+                _uiState.update { it.copy(isLoading = false, errorMessage = "Enter a valid amount") }
                 return@launch
             }
 
             val payerContributions = mutableMapOf<String, Double>()
             if (state.buyerMode == BuyerMode.SINGLE_BUYER) {
-                val primary = state.primaryBuyerId
-                if (primary.isBlank() || primary !in freshMembers) {
-                    _uiState.update { it.copy(errorMessage = "Select a valid buyer") }
+                val resolvedPrimary = resolveMemberId(
+                    preferredId = state.primaryBuyerId,
+                    availableMemberIds = membersForValidation
+                ) ?: resolveMemberId(
+                    preferredId = state.primaryBuyerId,
+                    availableMemberIds = freshMembers
+                )
+
+                if (resolvedPrimary.isNullOrBlank()) {
+                    _uiState.update { it.copy(isLoading = false, errorMessage = "Select a valid buyer") }
                     return@launch
                 }
-                payerContributions[primary] = amount
+                payerContributions[resolvedPrimary] = amount
             } else {
                 if (state.selectedPayerIds.isEmpty()) {
-                    _uiState.update { it.copy(errorMessage = "Select at least one payer") }
+                    _uiState.update { it.copy(isLoading = false, errorMessage = "Select at least one payer") }
                     return@launch
                 }
 
                 state.selectedPayerIds.forEach { payerId ->
-                    if (payerId !in freshMembers) {
-                        _uiState.update { it.copy(errorMessage = "One of the selected payers is no longer in this group") }
+                    val resolvedPayerId = resolveMemberId(
+                        preferredId = payerId,
+                        availableMemberIds = membersForValidation
+                    ) ?: resolveMemberId(
+                        preferredId = payerId,
+                        availableMemberIds = freshMembers
+                    )
+
+                    if (resolvedPayerId.isNullOrBlank()) {
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                errorMessage = "One of the selected payers is no longer in this group"
+                            )
+                        }
                         return@launch
                     }
 
                     val contribution = state.payerAmountInputs[payerId]?.toDoubleOrNull()
                     if (contribution == null || contribution <= 0.0) {
-                        _uiState.update { it.copy(errorMessage = "Enter valid contribution amounts for all selected payers") }
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                errorMessage = "Enter valid contribution amounts for all selected payers"
+                            )
+                        }
                         return@launch
                     }
-                    payerContributions[payerId] = contribution
+                    payerContributions[resolvedPayerId] = contribution
                 }
 
                 val contributionTotal = payerContributions.values.sum()
                 if (kotlin.math.abs(contributionTotal - amount) > 0.009) {
-                    _uiState.update { it.copy(errorMessage = "Payer contributions must match total amount") }
+                    _uiState.update { it.copy(isLoading = false, errorMessage = "Payer contributions must match total amount") }
                     return@launch
                 }
             }
 
-            val requiredPayers = if (state.buyerMode == BuyerMode.SINGLE_BUYER) {
-                setOf(state.primaryBuyerId)
-            } else {
-                state.selectedPayerIds
-            }
+            val requiredPayers = payerContributions.keys
 
             val splitMemberIds = if (state.splitMode == SplitMode.ALL_MEMBERS) {
-                freshMembers
+                membersForValidation
             } else {
-                (state.selectedSplitMemberIds + requiredPayers).filter { it in freshMembers }
+                (state.selectedSplitMemberIds + requiredPayers)
+                    .mapNotNull { candidate ->
+                        resolveMemberId(candidate, membersForValidation)
+                            ?: resolveMemberId(candidate, freshMembers)
+                    }
+                    .distinct()
             }
 
             if (splitMemberIds.isEmpty()) {
-                _uiState.update { it.copy(errorMessage = "Select at least one member to split with") }
+                _uiState.update { it.copy(isLoading = false, errorMessage = "Select at least one member to split with") }
                 return@launch
             }
 
-            _uiState.update { it.copy(isLoading = true) }
             val normalizedReceiptItems = state.detectedReceiptItems
                 .mapNotNull { item ->
                     val name = item.name.trim()
@@ -709,29 +807,33 @@ class AddExpenseViewModel(
                 }
 
             val editingId = state.editingExpenseId
-            val operationResult = if (state.isEditing && !editingId.isNullOrBlank()) {
-                requestUpdateExpenseUseCase.execute(
-                    groupId = groupId,
-                    expenseId = editingId,
-                    amount = amount,
-                    description = state.description,
-                    splitMemberIds = splitMemberIds,
-                    payerContributions = payerContributions,
-                    receiptImageBytes = receiptImageBytes,
-                    removeReceiptImage = removeExistingReceiptImage,
-                    receiptItems = normalizedReceiptItems
-                )
-            } else {
-                requestCreateExpenseUseCase.execute(
-                    groupId = groupId,
-                    amount = amount,
-                    description = state.description,
-                    splitMemberIds = splitMemberIds,
-                    payerContributions = payerContributions,
-                    receiptImageBytes = receiptImageBytes,
-                    receiptItems = normalizedReceiptItems
-                )
-            }
+            val operationResult = withTimeoutOrNull(20000L) {
+                if (state.isEditing && !editingId.isNullOrBlank()) {
+                    requestUpdateExpenseUseCase.execute(
+                        groupId = groupId,
+                        expenseId = editingId,
+                        amount = amount,
+                        description = state.description,
+                        splitMemberIds = splitMemberIds,
+                        payerContributions = payerContributions,
+                        receiptImageBytes = receiptImageBytes,
+                        removeReceiptImage = removeExistingReceiptImage,
+                        receiptItems = normalizedReceiptItems
+                    )
+                } else {
+                    requestCreateExpenseUseCase.execute(
+                        groupId = groupId,
+                        amount = amount,
+                        description = state.description,
+                        splitMemberIds = splitMemberIds,
+                        payerContributions = payerContributions,
+                        receiptImageBytes = receiptImageBytes,
+                        receiptItems = normalizedReceiptItems
+                    )
+                }
+            } ?: Result.failure(
+                IllegalStateException("Operation timed out. If you're offline, your connection status may not be stable.")
+            )
 
             operationResult.onSuccess {
                 _uiState.update { it.copy(isLoading = false) }
@@ -746,4 +848,44 @@ class AddExpenseViewModel(
             }
         }
     }
+}
+
+private fun normalizeMemberId(value: String): String {
+    return value.trim().substringAfterLast('/')
+}
+
+private fun resolveMemberId(preferredId: String, availableMemberIds: List<String>): String? {
+    if (preferredId.isBlank()) return null
+    val direct = availableMemberIds.firstOrNull { it == preferredId }
+    if (direct != null) return direct
+
+    val normalizedPreferred = normalizeMemberId(preferredId)
+    return availableMemberIds.firstOrNull { normalizeMemberId(it) == normalizedPreferred }
+}
+
+private fun canonicalizeMemberIdSet(ids: Set<String>, availableMemberIds: List<String>): Set<String> {
+    return ids.mapNotNull { id -> resolveMemberId(id, availableMemberIds) }.toSet()
+}
+
+private fun canonicalizeMemberKeyMap(
+    valuesByMemberId: Map<String, String>,
+    availableMemberIds: List<String>
+): Map<String, String> {
+    return valuesByMemberId.entries
+        .mapNotNull { (memberId, value) ->
+            resolveMemberId(memberId, availableMemberIds)?.let { canonicalId -> canonicalId to value }
+        }
+        .groupBy({ it.first }, { it.second })
+        .mapValues { (_, values) -> values.lastOrNull().orEmpty() }
+}
+
+private fun Map<String, String>.withNormalizedAliases(): Map<String, String> {
+    val expanded = toMutableMap()
+    entries.forEach { (memberId, label) ->
+        val normalized = normalizeMemberId(memberId)
+        if (normalized.isNotBlank() && !expanded.containsKey(normalized)) {
+            expanded[normalized] = label
+        }
+    }
+    return expanded
 }

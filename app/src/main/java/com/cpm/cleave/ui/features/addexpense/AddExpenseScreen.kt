@@ -174,8 +174,20 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
         )
     }
 
+    fun normalizeMemberId(value: String): String = value.trim().substringAfterLast('/')
+
     val labelForMember: (String) -> String = { memberId ->
-        uiState.memberDisplayNames[memberId] ?: memberId
+        val normalizedMemberId = normalizeMemberId(memberId)
+        val normalizedCurrentUserId = uiState.currentUserId?.let(::normalizeMemberId).orEmpty()
+
+        if (normalizedCurrentUserId.isNotBlank() && normalizedMemberId == normalizedCurrentUserId) {
+            "You"
+        } else {
+            uiState.memberDisplayNames[memberId]?.takeIf { it.isNotBlank() }
+                ?: uiState.memberDisplayNames[normalizedMemberId]?.takeIf { it.isNotBlank() }
+                ?: memberId.takeIf { it.isNotBlank() }
+                ?: "User"
+        }
     }
 
     LaunchedEffect(uiState.editingExpenseId, uiState.receiptImagePath, uiState.hasReceiptImage) {

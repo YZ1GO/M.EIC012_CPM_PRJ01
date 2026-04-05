@@ -779,7 +779,7 @@ fun GroupDetailsScreen(
             )
         }
         uiState.selectedMemberForExpulsionId?.let { memberId ->
-            val memberName = resolveDisplayName(uiState.userDisplayNames, memberId)
+            val memberName = resolveDisplayName(uiState.userDisplayNames, memberId, uiState.currentUserId)
             AlertDialog(
                 onDismissRequest = { viewModel.dismissMemberExpulsionDialog() },
                 title = { Text("Remove member") },
@@ -799,7 +799,7 @@ fun GroupDetailsScreen(
             )
         }
         uiState.selectedMemberForProfileId?.let { memberId ->
-            val memberName = resolveDisplayName(uiState.userDisplayNames, memberId)
+            val memberName = resolveDisplayName(uiState.userDisplayNames, memberId, uiState.currentUserId)
             val photoUrl = resolveMemberPhotoUrl(uiState.userPhotoUrls, memberId)
             val lastSeen = uiState.userLastSeen[memberId]
             val canRemoveMember = uiState.canDeleteGroup && memberId != currentGroup.ownerId
@@ -835,8 +835,8 @@ fun GroupDetailsScreen(
             )
         }
         uiState.selectedDebtForPayment?.let { selectedDebt ->
-            val fromName = resolveDisplayName(uiState.userDisplayNames, selectedDebt.fromUser)
-            val toName = resolveDisplayName(uiState.userDisplayNames, selectedDebt.toUser)
+            val fromName = resolveDisplayName(uiState.userDisplayNames, selectedDebt.fromUser, uiState.currentUserId)
+            val toName = resolveDisplayName(uiState.userDisplayNames, selectedDebt.toUser, uiState.currentUserId)
             
             AlertDialog(
                 onDismissRequest = { viewModel.dismissDebtPaymentDialog() },
@@ -940,7 +940,7 @@ fun GroupDetailsScreen(
             val orderedMembers = currentGroup.members.distinct().sortedWith(
                 compareBy<String> { memberId ->
                     when {
-                        !currentUserId.isNullOrBlank() && memberId == currentUserId -> 0
+                        !currentUserId.isNullOrBlank() && normalizeIdentity(memberId) == normalizeIdentity(currentUserId) -> 0
                         memberId == currentGroup.ownerId -> 1
                         else -> 2
                     }
@@ -954,7 +954,7 @@ fun GroupDetailsScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 orderedMembers.forEach { memberId ->
-                    val memberName = resolveDisplayName(uiState.userDisplayNames, memberId)
+                    val memberName = resolveDisplayName(uiState.userDisplayNames, memberId, uiState.currentUserId)
                     val memberPhotoUrl = resolveMemberPhotoUrl(uiState.userPhotoUrls, memberId)
                     MemberAvatar(
                         name = memberName,
@@ -1022,9 +1022,11 @@ fun GroupDetailsScreen(
         } else {
             uiState.debtsWithReason.forEach { debtWithReason ->
                 val debt = debtWithReason.debt
-                val fromName = resolveDisplayName(uiState.userDisplayNames, debt.fromUser)
-                val toName = resolveDisplayName(uiState.userDisplayNames, debt.toUser)
-                val canSettleDebt = uiState.currentUserId == debt.fromUser
+                val currentUserIdForDebt = uiState.currentUserId
+                val fromName = resolveDisplayName(uiState.userDisplayNames, debt.fromUser, uiState.currentUserId)
+                val toName = resolveDisplayName(uiState.userDisplayNames, debt.toUser, uiState.currentUserId)
+                val canSettleDebt = !currentUserIdForDebt.isNullOrBlank() &&
+                    normalizeIdentity(currentUserIdForDebt) == normalizeIdentity(debt.fromUser)
                 
                 Row(
                     modifier = Modifier
@@ -1083,6 +1085,7 @@ fun GroupDetailsScreen(
                 ExpenseDetailsItem(
                     expense = expense,
                     userDisplayNames = uiState.userDisplayNames,
+                    currentUserId = uiState.currentUserId,
                     currencySymbol = currencySymbol,
                     onClick = expenseClick,
                     onLongPress = if (uiState.canDeleteGroup) { { viewModel.onExpenseLongPressed(expense.id) } } else null,
@@ -1171,6 +1174,7 @@ private fun generateQrBitmap(content: String, size: Int): Bitmap? {
 private fun ExpenseDetailsItem(
     expense: Expense,
     userDisplayNames: Map<String, String>,
+    currentUserId: String?,
     currencySymbol: String,
     onClick: (() -> Unit)? = null,
     onLongPress: (() -> Unit)? = null,
@@ -1180,10 +1184,10 @@ private fun ExpenseDetailsItem(
     val desc = expense.description.ifBlank { "(No description)" }
     val payerText = expense.payerContributions
         .joinToString(separator = ", ") { payer ->
-            val name = resolveDisplayName(userDisplayNames, payer.userId)
+            val name = resolveDisplayName(userDisplayNames, payer.userId, currentUserId)
             "$name: ${currencySymbol}${"%.2f".format(Locale.getDefault(), payer.amount)}"
         }
-        .ifBlank { resolveDisplayName(userDisplayNames, expense.paidByUserId) }
+        .ifBlank { resolveDisplayName(userDisplayNames, expense.paidByUserId, currentUserId) }
 
     val dateText = formatDate(expense.date)
 
@@ -1380,13 +1384,20 @@ private fun resolveMemberPhotoUrl(
 
 private fun resolveDisplayName(
     userDisplayNames: Map<String, String>,
-    userId: String
+    userId: String,
+    currentUserId: String? = null
 ): String {
-    val normalizedId = userId.trim().substringAfterLast('/')
+    val normalizedId = normalizeIdentity(userId)
+    val normalizedCurrentUserId = currentUserId?.let(::normalizeIdentity).orEmpty()
+
+    if (normalizedCurrentUserId.isNotBlank() && normalizedId == normalizedCurrentUserId) {
+        return "You"
+    }
+
     val resolvedName = userDisplayNames[userId]
         ?: userDisplayNames[normalizedId]
         ?: userDisplayNames.entries.firstOrNull { entry ->
-            entry.key.trim().substringAfterLast('/') == normalizedId
+            normalizeIdentity(entry.key) == normalizedId
         }?.value
 
     if (!resolvedName.isNullOrBlank()) {
@@ -1399,6 +1410,10 @@ private fun resolveDisplayName(
     }
 
     return "User"
+}
+
+private fun normalizeIdentity(value: String): String {
+    return value.trim().substringAfterLast('/')
 }
 
 @Composable
