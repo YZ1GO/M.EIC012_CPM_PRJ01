@@ -237,14 +237,26 @@ class GroupRepositoryImpl(
                 ?: return Result.failure(IllegalStateException("No authenticated Firebase user found."))
 
             val anonymousUser = authSessionStore.getActiveUser()
+            val reconciledGroups = runCatching {
+                getGroups().getOrNull()
+            }.getOrNull()
+
+            val effectiveGroupsForUser = reconciledGroups
+                ?: cache.loadGroups(authenticatedUserId)
+
             if (anonymousUser?.isAnonymous == true) {
-                val cachedMembershipCount = cache.loadGroups(authenticatedUserId).size
-                val effectiveMembershipCount = maxOf(cachedMembershipCount, anonymousUser.groups.size)
+                val effectiveMembershipCount = effectiveGroupsForUser.size
                 if (effectiveMembershipCount >= anonymousLimits.maxGroups) {
                     return Result.failure(
                         IllegalStateException("Anonymous users can belong to only 1 group.")
                     )
                 }
+            }
+
+            val anonymousUserForValidation = if (anonymousUser?.isAnonymous == true) {
+                anonymousUser.copy(groups = effectiveGroupsForUser.map { it.id })
+            } else {
+                anonymousUser
             }
 
             val command = PrepareGroupCreationCommand(name = name, currency = currency, imageUrl = imageUrl)
@@ -254,7 +266,7 @@ class GroupRepositoryImpl(
             for (attempt in 1..MAX_JOIN_CODE_ATTEMPTS) {
                 val candidate = prepareGroupCreationUseCase.execute(
                     command = command,
-                    currentUser = anonymousUser,
+                    currentUser = anonymousUserForValidation,
                     anonymousLimits = anonymousLimits
                 ).getOrElse { error ->
                     return Result.failure(error)
@@ -867,6 +879,10 @@ class GroupRepositoryImpl(
             val currentUserId = firebaseAuth.currentUser?.uid ?: activeUser?.id
                 ?: return Result.failure(IllegalStateException("No current user found."))
 
+            val reconciledGroups = runCatching {
+                getGroups().getOrNull()
+            }.getOrNull()
+
             val mappedGroupId = runCatching {
                 firestore.collection("group_join_codes")
                     .document(normalizedJoinCode)
@@ -876,9 +892,9 @@ class GroupRepositoryImpl(
             }.getOrNull() ?: return Result.failure(IllegalArgumentException("Invalid group code."))
 
             if (activeUser?.isAnonymous == true) {
-                val cachedGroups = cache.loadGroups(currentUserId)
-                val alreadyMemberOfTarget = cachedGroups.any { it.id == mappedGroupId }
-                val effectiveMembershipCount = maxOf(cachedGroups.size, activeUser.groups.size)
+                val effectiveGroupsForUser = reconciledGroups ?: cache.loadGroups(currentUserId)
+                val alreadyMemberOfTarget = effectiveGroupsForUser.any { it.id == mappedGroupId }
+                val effectiveMembershipCount = effectiveGroupsForUser.size
 
                 if (!alreadyMemberOfTarget && effectiveMembershipCount >= anonymousLimits.maxGroups) {
                     return Result.failure(
