@@ -360,6 +360,13 @@ class ExpenseRepositoryImpl(
 
             localExpenseRefreshEvents.tryEmit(groupId)
 
+            // If expense has a local receipt image, always defer sync until image is uploaded
+            if (receiptImagePath.isLocalReceiptPath()) {
+                pendingSyncStore.addPendingExpenseSync(groupId, expenseId)
+                pendingSyncStore.setPendingExpenseSyncPayload(groupId, expenseId, pendingPayloadJson)
+                return Result.success(Unit)
+            }
+
             if (!connectivityStatus.isNetworkAvailable()) {
                 pendingSyncStore.addPendingExpenseSync(groupId, expenseId)
                 pendingSyncStore.setPendingExpenseSyncPayload(groupId, expenseId, pendingPayloadJson)
@@ -377,7 +384,7 @@ class ExpenseRepositoryImpl(
                         mutationTimestamp = mutationTimestamp,
                         splitMemberIds = splitMemberIds,
                         payerContributions = normalizedContributions,
-                        imagePath = receiptImagePath.takeUnless { it.isLocalReceiptPath() },
+                        imagePath = null,
                         receiptItems = receiptItems
                     )
                     true
@@ -620,34 +627,69 @@ class ExpenseRepositoryImpl(
             val syncReceiptItems = if (preferPayload) payload!!.receiptItems else localExpense?.receiptItems ?: payload!!.receiptItems
             val sourceImagePath = payload?.imagePath ?: localExpense?.imagePath
 
-            val syncedImagePath = resolveImagePathForSync(
-                groupId = pending.groupId,
-                expenseId = syncExpenseId,
-                currentImagePath = sourceImagePath
-            )
+            // If source has local image, attempt upload first
+            if (sourceImagePath.isLocalReceiptPath()) {
+                val syncedImagePath = resolveImagePathForSync(
+                    groupId = pending.groupId,
+                    expenseId = syncExpenseId,
+                    currentImagePath = sourceImagePath
+                )
 
-            val syncSucceeded = runCatching {
-                withTimeoutOrNull(4000L) {
-                    syncExpenseToRemote(
-                        expenseId = syncExpenseId,
-                        groupId = pending.groupId,
-                        amount = syncAmount,
-                        description = syncDescription,
-                        date = syncDate,
-                        mutationTimestamp = syncMutationTimestamp,
-                        splitMemberIds = syncSplitMemberIds,
-                        payerContributions = syncPayerContributions,
-                        imagePath = syncedImagePath,
-                        receiptItems = syncReceiptItems
-                    )
-                    true
-                } ?: false
-            }.getOrDefault(false)
+                // Only proceed to sync if image upload succeeded (not local anymore)
+                if (syncedImagePath.isLocalReceiptPath()) {
+                    // Image still local; upload failed. Keep pending and try again later.
+                    return@forEach
+                }
 
-            if (syncSucceeded) {
-                pendingSyncStore.removePendingExpenseSync(pending.groupId, pending.expenseId)
+                // Image uploaded successfully, now sync with the URL
+                val syncSucceeded = runCatching {
+                    withTimeoutOrNull(4000L) {
+                        syncExpenseToRemote(
+                            expenseId = syncExpenseId,
+                            groupId = pending.groupId,
+                            amount = syncAmount,
+                            description = syncDescription,
+                            date = syncDate,
+                            mutationTimestamp = syncMutationTimestamp,
+                            splitMemberIds = syncSplitMemberIds,
+                            payerContributions = syncPayerContributions,
+                            imagePath = syncedImagePath,
+                            receiptItems = syncReceiptItems
+                        )
+                        true
+                    } ?: false
+                }.getOrDefault(false)
+
+                if (syncSucceeded) {
+                    pendingSyncStore.removePendingExpenseSync(pending.groupId, pending.expenseId)
+                } else {
+                    // Keep pending for later retry.
+                }
             } else {
-                // Keep pending for later retry.
+                // No local image, proceed with normal sync
+                val syncSucceeded = runCatching {
+                    withTimeoutOrNull(4000L) {
+                        syncExpenseToRemote(
+                            expenseId = syncExpenseId,
+                            groupId = pending.groupId,
+                            amount = syncAmount,
+                            description = syncDescription,
+                            date = syncDate,
+                            mutationTimestamp = syncMutationTimestamp,
+                            splitMemberIds = syncSplitMemberIds,
+                            payerContributions = syncPayerContributions,
+                            imagePath = sourceImagePath,
+                            receiptItems = syncReceiptItems
+                        )
+                        true
+                    } ?: false
+                }.getOrDefault(false)
+
+                if (syncSucceeded) {
+                    pendingSyncStore.removePendingExpenseSync(pending.groupId, pending.expenseId)
+                } else {
+                    // Keep pending for later retry.
+                }
             }
         }
     }

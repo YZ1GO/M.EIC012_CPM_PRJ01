@@ -233,10 +233,16 @@ class Cache(context: Context) {
             if (groupDao.getGroupById(groupId) == null) return@withTransaction
 
             expenses.forEach { expense ->
+                val existingExpense = expenseDao.getExpenseById(expense.id)
                 val payerContributions = expense.payerContributions
                     .ifEmpty { listOf(PayerContribution(userId = expense.paidByUserId, amount = expense.amount)) }
                 payerContributions.forEach { contribution -> ensureUserExists(contribution.userId) }
                 val primaryPayer = payerContributions.maxByOrNull { it.amount }?.userId ?: expense.paidByUserId
+                val preservedImagePath = when {
+                    !expense.imagePath.isNullOrBlank() -> expense.imagePath
+                    !existingExpense?.imagePath.isNullOrBlank() -> existingExpense.imagePath
+                    else -> expense.imagePath
+                }
                 expenseDao.insertExpense(
                     ExpenseEntity(
                         id = expense.id,
@@ -245,7 +251,7 @@ class Cache(context: Context) {
                         date = expense.date,
                         groupId = expense.groupId,
                         paidBy = primaryPayer,
-                        imagePath = expense.imagePath,
+                        imagePath = preservedImagePath,
                         receiptItemsJson = encodeReceiptItems(expense.receiptItems)
                     )
                 )
