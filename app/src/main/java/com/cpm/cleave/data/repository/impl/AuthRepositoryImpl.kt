@@ -75,7 +75,9 @@ class AuthRepositoryImpl(
                 Result.success(authSessionStore.getActiveUser())
             }
         } catch (e: Exception) {
-            Result.failure(e)
+            // Keep app entry local-first: if remote/session activation fails while offline,
+            // use the locally active user instead of forcing unauthenticated state.
+            Result.success(authSessionStore.getActiveUser())
         }
     }
 

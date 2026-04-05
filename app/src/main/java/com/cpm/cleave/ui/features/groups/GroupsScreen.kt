@@ -971,51 +971,48 @@ fun GroupDetailsScreen(
         SectionTitle("Debts")
         Spacer(modifier = Modifier.height(12.dp))
         
-        val currentUserId = uiState.currentUserId
-        if (!currentUserId.isNullOrBlank()) {
-            val totalYouOwe = uiState.totalYouOwe
-            val totalOwedToYou = uiState.totalOwedToYou
-            val oweAccent = colorScheme.error
-            val owedAccent = LightTealSecondary
+        val totalYouOwe = uiState.totalYouOwe
+        val totalOwedToYou = uiState.totalOwedToYou
+        val oweAccent = colorScheme.error
+        val owedAccent = LightTealSecondary
 
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Surface(
-                    color = oweAccent.copy(alpha = if (totalYouOwe > 0) 0.16f else 0.08f),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .border(
-                            1.dp,
-                            colorScheme.outlineVariant.copy(alpha = 0.5f),
-                            RoundedCornerShape(12.dp)
-                        )
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("You owe", fontSize = 12.sp, color = oweAccent.copy(alpha = 0.8f))
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("${currencySymbol}${"%.2f".format(Locale.getDefault(), totalYouOwe)}", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = oweAccent)
-                    }
-                }
-                Surface(
-                    color = owedAccent.copy(alpha = if (totalOwedToYou > 0) 0.16f else 0.08f),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .border(
-                            1.dp,
-                            colorScheme.outlineVariant.copy(alpha = 0.5f),
-                            RoundedCornerShape(12.dp)
-                        )
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Owed to you", fontSize = 12.sp, color = owedAccent.copy(alpha = 0.8f))
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("${currencySymbol}${"%.2f".format(Locale.getDefault(), totalOwedToYou)}", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = owedAccent)
-                    }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Surface(
+                color = oweAccent.copy(alpha = if (totalYouOwe > 0) 0.16f else 0.08f),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .border(
+                        1.dp,
+                        colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        RoundedCornerShape(12.dp)
+                    )
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("You owe", fontSize = 12.sp, color = oweAccent.copy(alpha = 0.8f))
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("${currencySymbol}${"%.2f".format(Locale.getDefault(), totalYouOwe)}", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = oweAccent)
                 }
             }
-            Spacer(modifier = Modifier.height(16.dp))
+            Surface(
+                color = owedAccent.copy(alpha = if (totalOwedToYou > 0) 0.16f else 0.08f),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .border(
+                        1.dp,
+                        colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        RoundedCornerShape(12.dp)
+                    )
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("Owed to you", fontSize = 12.sp, color = owedAccent.copy(alpha = 0.8f))
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("${currencySymbol}${"%.2f".format(Locale.getDefault(), totalOwedToYou)}", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = owedAccent)
+                }
+            }
         }
+        Spacer(modifier = Modifier.height(16.dp))
 
         if (uiState.debtsWithReason.isEmpty()) {
             Text("No open debts. Everything is settled!", color = colorScheme.onSurfaceVariant, fontSize = 14.sp)

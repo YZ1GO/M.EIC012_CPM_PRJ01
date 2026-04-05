@@ -93,11 +93,11 @@ class GroupDetailsViewModel(
                                 val elapsed = now - (firstObserveSuccessAtMs ?: now)
 
                                 val hasCoherentContent =
-                                    data.expenses.isNotEmpty()
+                                    data.group.id.isNotBlank() &&
+                                        (data.group.members.isNotEmpty() || data.expenses.isNotEmpty() || data.debts.isNotEmpty())
                                 val allowEmptyFallback =
                                     elapsed >= INITIAL_RENDER_TIMEOUT_MS &&
-                                        data.expenses.isEmpty() &&
-                                        data.debts.isEmpty()
+                                        data.group.id.isNotBlank()
 
                                 if (!hasCoherentContent && !allowEmptyFallback) {
                                     Log.d(
