@@ -982,7 +982,13 @@ fun GroupDetailsScreen(
                 Surface(
                     color = oweAccent.copy(alpha = if (totalYouOwe > 0) 0.16f else 0.08f),
                     shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .border(
+                            1.dp,
+                            colorScheme.outlineVariant.copy(alpha = 0.5f),
+                            RoundedCornerShape(12.dp)
+                        )
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text("You owe", fontSize = 12.sp, color = oweAccent.copy(alpha = 0.8f))
@@ -993,7 +999,13 @@ fun GroupDetailsScreen(
                 Surface(
                     color = owedAccent.copy(alpha = if (totalOwedToYou > 0) 0.16f else 0.08f),
                     shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .border(
+                            1.dp,
+                            colorScheme.outlineVariant.copy(alpha = 0.5f),
+                            RoundedCornerShape(12.dp)
+                        )
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text("Owed to you", fontSize = 12.sp, color = owedAccent.copy(alpha = 0.8f))
@@ -1020,6 +1032,11 @@ fun GroupDetailsScreen(
                         .padding(vertical = 6.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                        .border(
+                            1.dp,
+                            colorScheme.outlineVariant.copy(alpha = 0.5f),
+                            RoundedCornerShape(12.dp)
+                        )
                         .then(if (canSettleDebt) Modifier.clickable { viewModel.onDebtClicked(debt) } else Modifier)
                         .padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically
