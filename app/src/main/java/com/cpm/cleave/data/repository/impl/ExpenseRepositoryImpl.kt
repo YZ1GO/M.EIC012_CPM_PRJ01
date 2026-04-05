@@ -354,6 +354,11 @@ class ExpenseRepositoryImpl(
                 null
             }
 
+            if (receiptImageBytes != null && receiptImagePath.isNullOrBlank()) {
+                Log.w("ExpenseRepo", "Receipt capture provided but image could not be stored for expense=$expenseId")
+                return Result.failure(IllegalStateException("Could not store receipt image"))
+            }
+
             cache.insertExpenseWithSplit(
                 expenseId = expenseId,
                 amount = amount,
@@ -404,7 +409,7 @@ class ExpenseRepositoryImpl(
                         mutationTimestamp = mutationTimestamp,
                         splitMemberIds = splitMemberIds,
                         payerContributions = normalizedContributions,
-                        imagePath = null,
+                        imagePath = receiptImagePath,
                         receiptItems = receiptItems
                     )
                     true
@@ -500,6 +505,11 @@ class ExpenseRepositoryImpl(
                 existingExpense!!.imagePath
             }
 
+            if (receiptImageBytes != null && receiptImagePath.isNullOrBlank()) {
+                Log.w("ExpenseRepo", "Receipt capture provided but image could not be stored for expense=$expenseId")
+                return Result.failure(IllegalStateException("Could not store receipt image"))
+            }
+
             cache.insertExpenseWithSplit(
                 expenseId = expenseId,
                 amount = amount,
@@ -527,6 +537,13 @@ class ExpenseRepositoryImpl(
             localExpenseRefreshEvents.tryEmit(groupId)
 
             if (!connectivityStatus.isNetworkAvailable()) {
+                pendingSyncStore.addPendingExpenseSync(groupId, expenseId)
+                pendingSyncStore.setPendingExpenseSyncPayload(groupId, expenseId, pendingPayloadJson)
+                return Result.success(Unit)
+            }
+
+            // If expense has a local receipt image, defer sync until image is uploaded.
+            if (receiptImagePath.isLocalReceiptPath()) {
                 pendingSyncStore.addPendingExpenseSync(groupId, expenseId)
                 pendingSyncStore.setPendingExpenseSyncPayload(groupId, expenseId, pendingPayloadJson)
                 return Result.success(Unit)
@@ -567,7 +584,7 @@ class ExpenseRepositoryImpl(
                         mutationTimestamp = mutationTimestamp,
                         splitMemberIds = splitMemberIds,
                         payerContributions = normalizedContributions,
-                        imagePath = receiptImagePath.takeUnless { it.isLocalReceiptPath() },
+                        imagePath = receiptImagePath,
                         receiptItems = receiptItems
                     )
                     true
@@ -679,9 +696,13 @@ class ExpenseRepositoryImpl(
                     currentImagePath = sourceImagePath
                 )
 
-                // Only proceed to sync if image upload succeeded (not local anymore)
-                if (syncedImagePath.isLocalReceiptPath()) {
-                    // Image still local; upload failed. Keep pending and try again later.
+                // Only proceed to sync if image upload produced a non-local URL.
+                if (syncedImagePath.isNullOrBlank() || syncedImagePath.isLocalReceiptPath()) {
+                    Log.w(
+                        "ExpenseRepo",
+                        "Deferred receipt sync skipped for expense=$syncExpenseId because image is not remotely available yet"
+                    )
+                    // Image missing or still local; keep pending and try again later.
                     return@forEach
                 }
 
