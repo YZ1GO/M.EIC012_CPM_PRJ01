@@ -348,7 +348,7 @@ class GetGroupDetailsUseCase(
         return ids
             .filter { it.isNotBlank() }
             .mapNotNull { userId ->
-                withTimeoutOrNull(120L) {
+                withTimeoutOrNull(700L) {
                     authRepository.getUserPhotoUrl(userId).getOrNull()
                 }
                     ?.takeIf { it.isNotBlank() }

@@ -149,6 +149,10 @@ class GroupDetailsViewModel(
                                     incoming = data.userDisplayNames,
                                     currentUserId = stableCurrentUserId
                                 )
+                                val stableUserPhotoUrls = mergePhotoUrls(
+                                    previous = it.userPhotoUrls,
+                                    incoming = data.userPhotoUrls
+                                )
 
                                 val nextState = it.copy(
                                     isLoading = false,
@@ -160,7 +164,7 @@ class GroupDetailsViewModel(
                                     totalYouOwe = stableTotalYouOwe,
                                     totalOwedToYou = stableTotalOwedToYou,
                                     userDisplayNames = stableUserDisplayNames,
-                                    userPhotoUrls = data.userPhotoUrls,
+                                    userPhotoUrls = stableUserPhotoUrls,
                                     userLastSeen = data.userLastSeen,
                                     canDeleteGroup = !data.group.ownerId.isNullOrBlank() && data.group.ownerId == stableCurrentUserId,
                                     editedGroupName = if (it.isEditingGroup) it.editedGroupName else data.group.name,
@@ -235,6 +239,10 @@ class GroupDetailsViewModel(
                             incoming = data.userDisplayNames,
                             currentUserId = stableCurrentUserId
                         )
+                        val stableUserPhotoUrls = mergePhotoUrls(
+                            previous = it.userPhotoUrls,
+                            incoming = data.userPhotoUrls
+                        )
                         val nextState = it.copy(
                             isLoading = false,
                             currentUserId = stableCurrentUserId,
@@ -245,7 +253,7 @@ class GroupDetailsViewModel(
                             totalYouOwe = stableTotalYouOwe,
                             totalOwedToYou = stableTotalOwedToYou,
                             userDisplayNames = stableUserDisplayNames,
-                            userPhotoUrls = data.userPhotoUrls,
+                            userPhotoUrls = stableUserPhotoUrls,
                             userLastSeen = data.userLastSeen,
                             canDeleteGroup = !data.group.ownerId.isNullOrBlank() && data.group.ownerId == stableCurrentUserId,
                             editedGroupName = if (it.isEditingGroup) it.editedGroupName else data.group.name,
@@ -304,6 +312,30 @@ class GroupDetailsViewModel(
 
             if (finalName.isNotBlank()) {
                 merged[userId] = finalName
+            }
+        }
+
+        return merged
+    }
+
+    private fun mergePhotoUrls(
+        previous: Map<String, String>,
+        incoming: Map<String, String>
+    ): Map<String, String> {
+        val merged = previous.toMutableMap()
+
+        incoming.forEach { (userId, incomingUrl) ->
+            if (incomingUrl.isBlank()) return@forEach
+
+            val normalizedIncomingId = normalizeIdentity(userId)
+            val existingEntryKey = merged.keys.firstOrNull { existingKey ->
+                normalizeIdentity(existingKey) == normalizedIncomingId
+            }
+
+            if (existingEntryKey != null) {
+                merged[existingEntryKey] = incomingUrl
+            } else {
+                merged[userId] = incomingUrl
             }
         }
 
