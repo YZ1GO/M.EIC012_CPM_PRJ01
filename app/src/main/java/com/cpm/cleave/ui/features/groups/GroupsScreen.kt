@@ -102,6 +102,7 @@ import com.cpm.cleave.model.Group
 import com.cpm.cleave.model.isDebtSettlementExpense
 import com.cpm.cleave.ui.features.addexpense.EditExpensePrefillStore
 import com.cpm.cleave.ui.features.creategroup.globalCurrencies
+import com.cpm.cleave.ui.theme.LightTealSecondary
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.delay
@@ -974,28 +975,30 @@ fun GroupDetailsScreen(
         if (!currentUserId.isNullOrBlank()) {
             val totalYouOwe = uiState.totalYouOwe
             val totalOwedToYou = uiState.totalOwedToYou
+            val oweAccent = colorScheme.error
+            val owedAccent = LightTealSecondary
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Surface(
-                    color = colorScheme.errorContainer.copy(alpha = if (totalYouOwe > 0) 1f else 0.4f),
+                    color = oweAccent.copy(alpha = if (totalYouOwe > 0) 0.16f else 0.08f),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.weight(1f)
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Text("You owe", fontSize = 12.sp, color = colorScheme.onErrorContainer.copy(alpha = 0.8f))
+                        Text("You owe", fontSize = 12.sp, color = oweAccent.copy(alpha = 0.8f))
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text("${currencySymbol}${"%.2f".format(Locale.getDefault(), totalYouOwe)}", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = colorScheme.onErrorContainer)
+                        Text("${currencySymbol}${"%.2f".format(Locale.getDefault(), totalYouOwe)}", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = oweAccent)
                     }
                 }
                 Surface(
-                    color = colorScheme.primaryContainer.copy(alpha = if (totalOwedToYou > 0) 1f else 0.4f),
+                    color = owedAccent.copy(alpha = if (totalOwedToYou > 0) 0.16f else 0.08f),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.weight(1f)
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Owed to you", fontSize = 12.sp, color = colorScheme.onPrimaryContainer.copy(alpha = 0.8f))
+                        Text("Owed to you", fontSize = 12.sp, color = owedAccent.copy(alpha = 0.8f))
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text("${currencySymbol}${"%.2f".format(Locale.getDefault(), totalOwedToYou)}", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = colorScheme.onPrimaryContainer)
+                        Text("${currencySymbol}${"%.2f".format(Locale.getDefault(), totalOwedToYou)}", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = owedAccent)
                     }
                 }
             }
