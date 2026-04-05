@@ -824,12 +824,30 @@ override suspend fun signUpWithEmail(
         ownershipJustTransferred: Boolean
     ) {
         val groupRef = firestore.collection("groups").document(groupId)
-        val oldMemberRef = groupRef.collection("members").document(oldUserId)
+        val normalizedOldUserId = normalizeIdentity(oldUserId)
+        val normalizedNewUserId = normalizeIdentity(newUserId)
+
+        suspend fun deleteLegacyMemberDocs() {
+            val membersSnapshot = groupRef.collection("members").get().awaitTaskResult()
+            membersSnapshot.documents.forEach { memberDoc ->
+                val memberDocId = normalizeIdentity(memberDoc.id)
+                val memberUserId = normalizeIdentity(memberDoc.getString("userId"))
+
+                val matchesOldIdentity =
+                    memberDocId == normalizedOldUserId || memberUserId == normalizedOldUserId
+                val matchesNewIdentity =
+                    memberDocId == normalizedNewUserId || memberUserId == normalizedNewUserId
+
+                if (matchesOldIdentity && !matchesNewIdentity) {
+                    runCatching { memberDoc.reference.delete().awaitTaskResult() }
+                }
+            }
+        }
 
         if (ownershipJustTransferred) {
             repeat(3) { attempt ->
                 val deleted = runCatching {
-                    oldMemberRef.delete().awaitTaskResult()
+                    deleteLegacyMemberDocs()
                     true
                 }.getOrDefault(false)
 
@@ -844,8 +862,15 @@ override suspend fun signUpWithEmail(
         }.getOrNull()
 
         if (currentOwnerId == newUserId) {
-            runCatching { oldMemberRef.delete().awaitTaskResult() }
+            runCatching { deleteLegacyMemberDocs() }
         }
+    }
+
+    private fun normalizeIdentity(raw: String?): String? {
+        return raw
+            ?.trim()
+            ?.substringAfterLast('/')
+            ?.takeIf { it.isNotBlank() }
     }
 
     private suspend fun hasAnonymousFinancialFootprint(anonymousUserId: String): Boolean {
