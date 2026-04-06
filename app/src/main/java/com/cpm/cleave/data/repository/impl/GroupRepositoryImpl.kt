@@ -81,11 +81,12 @@ class GroupRepositoryImpl(
                 val memberDocRegistrations = mutableMapOf<String, ListenerRegistration>()
                 val membersCollectionRegistrations = mutableMapOf<String, ListenerRegistration>()
 
-                suspend fun refreshAndEmit() {
+                suspend fun refreshAndEmit(forceRemote: Boolean = false) {
                     refreshMutex.withLock {
                         val now = System.currentTimeMillis()
                         val canRefreshRemote =
-                            now - lastRemoteRefreshAtMs >= OBSERVE_REMOTE_REFRESH_MIN_INTERVAL_MS
+                            forceRemote ||
+                                now - lastRemoteRefreshAtMs >= OBSERVE_REMOTE_REFRESH_MIN_INTERVAL_MS
 
                         if (!canRefreshRemote) {
                             // Firestore listeners can burst many events in a short window.
@@ -122,7 +123,7 @@ class GroupRepositoryImpl(
                                         .document(groupId)
                                         .addSnapshotListener { snapshot, error ->
                                             if (snapshot != null && !snapshot.exists()) {
-                                                scope.launch { refreshAndEmit() }
+                                                scope.launch { refreshAndEmit(forceRemote = true) }
                                                 return@addSnapshotListener
                                             }
 
@@ -130,11 +131,11 @@ class GroupRepositoryImpl(
                                                 if (error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
                                                     groupDocRegistrations[groupId]?.remove() // Safely stop the listener
                                                 }
-                                                scope.launch { refreshAndEmit() }
+                                                scope.launch { refreshAndEmit(forceRemote = true) }
                                                 return@addSnapshotListener
                                             }
 
-                                            scope.launch { refreshAndEmit() }
+                                            scope.launch { refreshAndEmit(forceRemote = true) }
                                         }
                                     groupDocRegistrations[groupId] = listener
                                 }
@@ -146,7 +147,7 @@ class GroupRepositoryImpl(
                                         .document(userId)
                                         .addSnapshotListener { snapshot, error ->
                                             if (snapshot != null && !snapshot.exists()) {
-                                                scope.launch { refreshAndEmit() }
+                                                scope.launch { refreshAndEmit(forceRemote = true) }
                                                 return@addSnapshotListener
                                             }
 
@@ -154,11 +155,11 @@ class GroupRepositoryImpl(
                                                 if (error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
                                                     memberDocRegistrations[groupId]?.remove() // Safely stop the listener
                                                 }
-                                                scope.launch { refreshAndEmit() }
+                                                scope.launch { refreshAndEmit(forceRemote = true) }
                                                 return@addSnapshotListener
                                             }
 
-                                            scope.launch { refreshAndEmit() }
+                                            scope.launch { refreshAndEmit(forceRemote = true) }
                                         }
                                     memberDocRegistrations[groupId] = listener
                                 }
@@ -169,7 +170,7 @@ class GroupRepositoryImpl(
                                         .collection("members")
                                         .addSnapshotListener { snapshot, error ->
                                             if (snapshot != null && snapshot.isEmpty) {
-                                                scope.launch { refreshAndEmit() }
+                                                scope.launch { refreshAndEmit(forceRemote = true) }
                                                 return@addSnapshotListener
                                             }
 
@@ -177,11 +178,11 @@ class GroupRepositoryImpl(
                                                 if (error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
                                                     membersCollectionRegistrations[groupId]?.remove() // Safely stop the listener
                                                 }
-                                                scope.launch { refreshAndEmit() }
+                                                scope.launch { refreshAndEmit(forceRemote = true) }
                                                 return@addSnapshotListener
                                             }
 
-                                            scope.launch { refreshAndEmit() }
+                                            scope.launch { refreshAndEmit(forceRemote = true) }
                                         }
                                     membersCollectionRegistrations[groupId] = listener
                                 }
@@ -206,12 +207,12 @@ class GroupRepositoryImpl(
                             // Keeping it alive allows automatic recovery after auth is restored.
                             scope.launch {
                                 delay(800)
-                                refreshAndEmit()
+                                refreshAndEmit(forceRemote = true)
                             }
                             return@addSnapshotListener
                         }
                         scope.launch {
-                            refreshAndEmit()
+                            refreshAndEmit(forceRemote = true)
                         }
                     }
 

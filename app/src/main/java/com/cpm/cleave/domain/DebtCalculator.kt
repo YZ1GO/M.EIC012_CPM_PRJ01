@@ -4,14 +4,8 @@ import com.cpm.cleave.model.Debt
 import com.cpm.cleave.model.Expense
 import com.cpm.cleave.model.ExpenseShare
 import com.cpm.cleave.model.PayerContribution
-import kotlin.math.round
 
 class DebtCalculator {
-    companion object {
-        // Treat values below one cent as zero to avoid floating-point residue in debt math.
-        private const val BALANCE_EPSILON = 0.009
-    }
-
     fun calculateDebts(
         groupMembers: List<String>,
         expenses: List<Expense>,
@@ -19,28 +13,28 @@ class DebtCalculator {
     ): List<Debt> {
         if (groupMembers.isEmpty() || expenses.isEmpty()) return emptyList()
 
-        val balances = groupMembers.associateWith { 0.0 }.toMutableMap()
+        val balances = groupMembers.associateWith { 0L }.toMutableMap()
 
         expenses.forEach { expense ->
             val payerContributions = expense.payerContributions.ifEmpty {
                 listOf(PayerContribution(userId = expense.paidByUserId, amount = expense.amount))
             }
             payerContributions.forEach { contribution ->
-                balances[contribution.userId] = (balances[contribution.userId] ?: 0.0) + contribution.amount
+                balances[contribution.userId] = (balances[contribution.userId] ?: 0L) + toCents(contribution.amount)
             }
 
             val splits = sharesByExpenseId[expense.id].orEmpty()
             splits.forEach { split ->
-                balances[split.userId] = (balances[split.userId] ?: 0.0) - split.amount
+                balances[split.userId] = (balances[split.userId] ?: 0L) - toCents(split.amount)
             }
         }
 
         val creditors = balances
-            .filterValues { it > BALANCE_EPSILON }
+            .filterValues { it > 0L }
             .map { it.key to it.value }
             .toMutableList()
         val debtors = balances
-            .filterValues { it < -BALANCE_EPSILON }
+            .filterValues { it < 0L }
             .map { it.key to -it.value }
             .toMutableList()
 
@@ -54,12 +48,12 @@ class DebtCalculator {
             val (debtorId, debtorAmount) = debtors[debtorIndex]
 
             val transfer = minOf(creditorAmount, debtorAmount)
-            if (transfer > BALANCE_EPSILON) {
+            if (transfer > 0L) {
                 debts.add(
                     Debt(
                         fromUser = debtorId,
                         toUser = creditorId,
-                        amount = roundToTwoDecimals(transfer)
+                        amount = transfer / 100.0
                     )
                 )
             }
@@ -70,14 +64,14 @@ class DebtCalculator {
             creditors[creditorIndex] = creditorId to remainingCreditor
             debtors[debtorIndex] = debtorId to remainingDebtor
 
-            if (remainingCreditor <= BALANCE_EPSILON) creditorIndex++
-            if (remainingDebtor <= BALANCE_EPSILON) debtorIndex++
+            if (remainingCreditor <= 0L) creditorIndex++
+            if (remainingDebtor <= 0L) debtorIndex++
         }
 
         return debts
     }
 
-    private fun roundToTwoDecimals(value: Double): Double {
-        return round(value * 100.0) / 100.0
+    private fun toCents(value: Double): Long {
+        return kotlin.math.round(value * 100.0).toLong()
     }
 }

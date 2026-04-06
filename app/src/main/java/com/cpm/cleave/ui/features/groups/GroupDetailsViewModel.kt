@@ -407,7 +407,7 @@ class GroupDetailsViewModel(
         val paymentRequestKey = buildDebtPaymentRequestKey(selectedDebt, amount)
         val now = System.currentTimeMillis()
         // Prevent accidental duplicate submissions of the same payment while offline sync catches up.
-        if (recentDebtPaymentRequests[paymentRequestKey]?.let { now - it < 20_000L } == true) {
+        if (recentDebtPaymentRequests[paymentRequestKey]?.let { now - it < 120_000L } == true) {
             _uiState.update { it.copy(errorMessage = "Payment already submitted. Please wait a moment.") }
             return
         }

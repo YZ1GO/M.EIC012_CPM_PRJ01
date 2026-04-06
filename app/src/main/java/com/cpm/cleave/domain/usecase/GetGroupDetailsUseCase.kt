@@ -142,11 +142,9 @@ class GetGroupDetailsUseCase(
                     previous.expenses
                 }
 
-                val stableDebts = if (observedDebts.isNotEmpty() || stableExpenses.isEmpty()) {
-                    observedDebts
-                } else {
-                    previous.debts
-                }
+                // Always trust the latest debt snapshot, including valid transitions
+                // to an empty debt list after payment settlement.
+                val stableDebts = observedDebts
 
                 val freshShares = runCatching {
                     expenseRepository.getExpenseSharesByGroup(groupId).getOrElse { emptyMap() }

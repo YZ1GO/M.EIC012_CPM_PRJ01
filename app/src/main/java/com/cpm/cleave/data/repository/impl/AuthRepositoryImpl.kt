@@ -14,6 +14,7 @@ import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.UserProfileChangeRequest
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.Dispatchers
@@ -276,6 +277,11 @@ override suspend fun signUpWithEmail(
 
             // 2. Perform Migration & Invalidate
             handleDataMigration(oldState, user.uid, mergeAnonymousData)
+            runCatching {
+                withTimeoutOrNull(2500L) {
+                    warmLocalGroupsForUser(user.uid)
+                }
+            }
 
             Result.success(mergedUser)
         } catch (e: Exception) { Result.failure(e) }
@@ -315,6 +321,11 @@ override suspend fun signUpWithEmail(
             }
 
             handleDataMigration(oldState, user.uid, mergeAnonymousData)
+            runCatching {
+                withTimeoutOrNull(2500L) {
+                    warmLocalGroupsForUser(user.uid)
+                }
+            }
 
             Result.success(mergedUser)
         } catch (e: Exception) { Result.failure(e) }
@@ -355,6 +366,11 @@ override suspend fun signUpWithEmail(
             }
 
             handleDataMigration(oldState, user.uid, mergeAnonymousData)
+            runCatching {
+                withTimeoutOrNull(2500L) {
+                    warmLocalGroupsForUser(user.uid)
+                }
+            }
 
             Result.success(mergedUser)
         } catch (e: Exception) { Result.failure(e) }
@@ -365,7 +381,55 @@ override suspend fun signUpWithEmail(
     private suspend fun captureAnonymousState(): AnonymousState {
         val oldUser = authSessionStore.getActiveUser()
         val groupIds = if (oldUser?.isAnonymous == true) {
-            cache.loadGroups(oldUser.id).map { it.id }.toSet()
+            val localGroupIds = cache.loadGroups(oldUser.id).map { it.id }.toMutableSet()
+            val normalizedOldUserId = normalizeIdentity(oldUser.id)
+
+            // Expand migration scope with remote discovery so owner-created groups are not missed
+            // when local membership cache is stale during Google continue flows.
+            val remoteOwnerGroupIds = withTimeoutOrNull(2500L) {
+                runCatching {
+                    firestore.collection("groups")
+                        .whereEqualTo("ownerId", oldUser.id)
+                        .get()
+                        .awaitTaskResult()
+                        .documents
+                        .map { it.id }
+                        .toSet()
+                }.getOrDefault(emptySet())
+            }.orEmpty()
+
+            val remoteMembershipGroupIds = withTimeoutOrNull(2500L) {
+                runCatching {
+                    firestore.collectionGroup("members")
+                        .whereEqualTo("userId", oldUser.id)
+                        .get()
+                        .awaitTaskResult()
+                        .documents
+                        .mapNotNull { document -> document.reference.parent.parent?.id }
+                        .toSet()
+                }.getOrDefault(emptySet())
+            }.orEmpty()
+
+            val remoteOwnerGroupIdsNormalized = if (normalizedOldUserId == null) {
+                emptySet()
+            } else {
+                withTimeoutOrNull(2500L) {
+                    runCatching {
+                        firestore.collection("groups")
+                            .whereEqualTo("ownerId", normalizedOldUserId)
+                            .get()
+                            .awaitTaskResult()
+                            .documents
+                            .map { it.id }
+                            .toSet()
+                    }.getOrDefault(emptySet())
+                }.orEmpty()
+            }
+
+            localGroupIds.addAll(remoteOwnerGroupIds)
+            localGroupIds.addAll(remoteOwnerGroupIdsNormalized)
+            localGroupIds.addAll(remoteMembershipGroupIds)
+            localGroupIds
         } else emptySet()
         return AnonymousState(oldUser?.id, groupIds)
     }
@@ -673,6 +737,7 @@ override suspend fun signUpWithEmail(
     ) {
         val now = System.currentTimeMillis()
         if (candidateGroupIds.isEmpty()) return
+        val normalizedOldUserId = normalizeIdentity(oldUserId)
 
         val maxBatchSize = 450
 
@@ -711,7 +776,11 @@ override suspend fun signUpWithEmail(
                 groupRef.get().awaitTaskResult().getString("ownerId")
             }.getOrNull()
 
-            if (ownerId == oldUserId) {
+            val matchesOldOwnerIdentity =
+                ownerId == oldUserId ||
+                    (normalizedOldUserId != null && normalizeIdentity(ownerId) == normalizedOldUserId)
+
+            if (matchesOldOwnerIdentity) {
                 ownershipBatch.update(
                     groupRef,
                     mapOf(
@@ -819,6 +888,12 @@ override suspend fun signUpWithEmail(
                 ownershipJustTransferred = ownershipJustTransferred
             )
         }
+
+        // Final hard cleanup by legacy doc ID to avoid stale old anonymous member docs
+        // remaining visible to other members after merge.
+        runCatching {
+            removeAnonymousUserFromAllGroupsInFirestore(oldUserId, candidateGroupIds)
+        }
     }
 
     private suspend fun cleanupLegacyMemberDoc(
@@ -832,43 +907,75 @@ override suspend fun signUpWithEmail(
         val normalizedNewUserId = normalizeIdentity(newUserId)
 
         suspend fun deleteLegacyMemberDocs() {
+            // Fast-path delete by canonical old doc id.
+            runCatching {
+                groupRef.collection("members")
+                    .document(oldUserId)
+                    .delete()
+                    .awaitTaskResult()
+            }
+
             val membersSnapshot = groupRef.collection("members").get().awaitTaskResult()
             membersSnapshot.documents.forEach { memberDoc ->
                 val memberDocId = normalizeIdentity(memberDoc.id)
                 val memberUserId = normalizeIdentity(memberDoc.getString("userId"))
 
-                val matchesOldIdentity =
-                    memberDocId == normalizedOldUserId || memberUserId == normalizedOldUserId
-                val matchesNewIdentity =
-                    memberDocId == normalizedNewUserId || memberUserId == normalizedNewUserId
+                val legacyByDocumentId = memberDocId == normalizedOldUserId
+                val legacyByUserIdField =
+                    memberUserId == normalizedOldUserId && memberDocId != normalizedNewUserId
 
-                if (matchesOldIdentity && !matchesNewIdentity) {
+                if (legacyByDocumentId || legacyByUserIdField) {
                     runCatching { memberDoc.reference.delete().awaitTaskResult() }
                 }
             }
         }
 
-        if (ownershipJustTransferred) {
-            repeat(3) { attempt ->
-                val deleted = runCatching {
-                    deleteLegacyMemberDocs()
-                    true
-                }.getOrDefault(false)
+        suspend fun hasLegacyMemberDocs(): Boolean {
+            val membersSnapshot = runCatching {
+                groupRef.collection("members").get().awaitTaskResult()
+            }.getOrNull() ?: return true
 
-                if (deleted) return
-                if (attempt < 2) kotlinx.coroutines.delay(120)
+            return membersSnapshot.documents.any { memberDoc ->
+                val memberDocId = normalizeIdentity(memberDoc.id)
+                val memberUserId = normalizeIdentity(memberDoc.getString("userId"))
+                val legacyByDocumentId = memberDocId == normalizedOldUserId
+                val legacyByUserIdField =
+                    memberUserId == normalizedOldUserId && memberDocId != normalizedNewUserId
+                legacyByDocumentId || legacyByUserIdField
+            }
+        }
+
+        if (ownershipJustTransferred) {
+            repeat(8) { attempt ->
+                val currentOwnerId = runCatching {
+                    groupRef.get().awaitTaskResult().getString("ownerId")
+                }.getOrNull()
+
+                val ownerMatchesNewIdentity =
+                    currentOwnerId == newUserId || normalizeIdentity(currentOwnerId) == normalizedNewUserId
+
+                if (!ownerMatchesNewIdentity) {
+                    if (attempt < 7) kotlinx.coroutines.delay(180)
+                    return@repeat
+                }
+
+                runCatching {
+                    deleteLegacyMemberDocs()
+                }
+
+                if (!hasLegacyMemberDocs()) return
+                if (attempt < 7) kotlinx.coroutines.delay(180)
             }
             return
         }
 
-        repeat(3) { attempt ->
-            val deleted = runCatching {
+        repeat(6) { attempt ->
+            runCatching {
                 deleteLegacyMemberDocs()
-                true
-            }.getOrDefault(false)
+            }
 
-            if (deleted) return
-            if (attempt < 2) kotlinx.coroutines.delay(120)
+            if (!hasLegacyMemberDocs()) return
+            if (attempt < 5) kotlinx.coroutines.delay(150)
         }
     }
 
@@ -932,6 +1039,67 @@ override suspend fun signUpWithEmail(
         // Execute final batch if there are pending operations
         if (operationCount > 0) {
             batch.commit().awaitTaskResult()
+        }
+    }
+
+    private suspend fun warmLocalGroupsForUser(userId: String) {
+        if (userId.isBlank()) return
+
+        val membershipSnapshot = runCatching {
+            firestore.collectionGroup("members")
+                .whereEqualTo("userId", userId)
+                .get()
+                .awaitTaskResult()
+        }.getOrElse { error ->
+            // Keep authentication resilient when remote membership fetch is unavailable.
+            if (error is FirebaseFirestoreException && error.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                return
+            }
+            return
+        }
+
+        val groupIds = membershipSnapshot.documents
+            .mapNotNull { document -> document.reference.parent.parent?.id }
+            .distinct()
+
+        groupIds.forEach { groupId ->
+            val groupSnapshot = runCatching {
+                firestore.collection("groups")
+                    .document(groupId)
+                    .get()
+                    .awaitTaskResult()
+            }.getOrNull() ?: return@forEach
+
+            if (!groupSnapshot.exists()) return@forEach
+
+            val membersSnapshot = runCatching {
+                firestore.collection("groups")
+                    .document(groupId)
+                    .collection("members")
+                    .get()
+                    .awaitTaskResult()
+            }.getOrNull() ?: return@forEach
+
+            val members = membersSnapshot.documents
+                .mapNotNull { member ->
+                    member.getString("userId")
+                        ?.takeIf { it.isNotBlank() }
+                        ?: member.id.takeIf { it.isNotBlank() }
+                }
+                .distinct()
+
+            cache.upsertGroupWithMembers(
+                com.cpm.cleave.model.Group(
+                    id = groupSnapshot.id,
+                    name = groupSnapshot.getString("name") ?: "Untitled group",
+                    imageUrl = groupSnapshot.getString("imageUrl"),
+                    currency = groupSnapshot.getString("currency") ?: "Euro",
+                    ownerId = groupSnapshot.getString("ownerId"),
+                    members = members,
+                    joinCode = groupSnapshot.getString("joinCode") ?: "",
+                    balances = emptyMap()
+                )
+            )
         }
     }
 
