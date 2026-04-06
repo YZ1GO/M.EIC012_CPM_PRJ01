@@ -595,7 +595,11 @@ fun AddExpenseScreen(viewModel: AddExpenseViewModel, onNavigateBack: () -> Unit)
             ) {
                 Text(
                     text = if (!uiState.isEditing) {
-                        "You pay the full amount"
+                        when {
+                            uiState.primaryBuyerId.isBlank() -> "Select a payer or switch to Multiple Payers"
+                            primaryPayerLabel.equals("You", ignoreCase = true) -> "You pay the full amount"
+                            else -> "$primaryPayerLabel pays the full amount"
+                        }
                     } else if (uiState.primaryBuyerId.isBlank() || primaryPayerLabel.equals("You", ignoreCase = true)) {
                         "You pay the full amount"
                     } else {

@@ -18,6 +18,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -49,13 +50,15 @@ class AuthRepositoryImpl(
                     )
                     // Keep local auth usable offline even when Firestore is unreachable.
                     runCatching {
-                        ensureUserDocument(
-                            uid = activatedAnonymous.id,
-                            name = activatedAnonymous.name,
-                            email = null,
-                            isAnonymous = true,
-                            photoUrl = activatedAnonymous.photoUrl
-                        )
+                        withTimeoutOrNull(700L) {
+                            ensureUserDocument(
+                                uid = activatedAnonymous.id,
+                                name = activatedAnonymous.name,
+                                email = null,
+                                isAnonymous = true,
+                                photoUrl = activatedAnonymous.photoUrl
+                            )
+                        }
                     }
                     Result.success(activatedAnonymous)
                 } else {

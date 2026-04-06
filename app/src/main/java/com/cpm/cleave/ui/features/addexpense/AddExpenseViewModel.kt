@@ -114,10 +114,15 @@ class AddExpenseViewModel(
                         } else {
                             it.buyerMode
                         }
+                        val fallbackPrimary = resolveMemberId(
+                            preferredId = it.primaryBuyerId,
+                            availableMemberIds = members
+                        ).orEmpty()
                         val updatedPrimaryBuyerId = if (editingExpenseId.isNullOrBlank()) {
                             when {
                                 currentUserId.isNotBlank() -> resolveMemberId(currentUserId, members).orEmpty()
-                                else -> members.firstOrNull().orEmpty()
+                                members.size == 1 -> members.first()
+                                else -> fallbackPrimary
                             }
                         } else {
                             it.primaryBuyerId
@@ -727,7 +732,12 @@ class AddExpenseViewModel(
                 )
 
                 if (resolvedPrimary.isNullOrBlank()) {
-                    _uiState.update { it.copy(isLoading = false, errorMessage = "Select a valid buyer") }
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = "Could not resolve your payer identity offline. Switch to Multiple Payers and select yourself."
+                        )
+                    }
                     return@launch
                 }
                 payerContributions[resolvedPrimary] = amount
