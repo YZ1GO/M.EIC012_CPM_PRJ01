@@ -12,6 +12,8 @@ import kotlinx.coroutines.withContext
 
 class AuthSessionStore(context: Context) {
     private val database = CleaveDatabase.getDatabase(context)
+    private val identityAliasPreferences =
+        context.getSharedPreferences(IDENTITY_ALIAS_PREFS_NAME, Context.MODE_PRIVATE)
     private val userDao = database.userDao()
     private val groupMemberDao = database.groupMemberDao()
     private val expenseDao = database.expenseDao()
@@ -285,7 +287,48 @@ class AuthSessionStore(context: Context) {
         }
     }
 
+    fun rememberIdentityAlias(oldUserId: String, newUserId: String) {
+        val normalizedOldUserId = normalizeUserId(oldUserId)
+        val normalizedNewUserId = normalizeUserId(newUserId)
+        if (normalizedOldUserId.isBlank() || normalizedNewUserId.isBlank()) return
+        if (normalizedOldUserId == normalizedNewUserId) return
+
+        identityAliasPreferences.edit()
+            .putString(identityAliasPreferenceKey(normalizedOldUserId), normalizedNewUserId)
+            .apply()
+    }
+
+    fun getIdentityAliases(): Map<String, String> {
+        return identityAliasPreferences.all
+            .mapNotNull { (key, value) ->
+                if (!key.startsWith(IDENTITY_ALIAS_KEY_PREFIX)) return@mapNotNull null
+                val oldUserId = key.removePrefix(IDENTITY_ALIAS_KEY_PREFIX)
+                val newUserId = value as? String
+                if (oldUserId.isBlank() || newUserId.isNullOrBlank()) {
+                    null
+                } else {
+                    oldUserId to newUserId
+                }
+            }
+            .toMap()
+    }
+
     fun observeActiveUser(): Flow<User?> {
         return userDao.observeActiveUser().map { it?.toDomain() }
+    }
+
+    private fun normalizeUserId(userId: String): String {
+        return userId
+            .trim()
+            .substringAfterLast('/')
+    }
+
+    private fun identityAliasPreferenceKey(userId: String): String {
+        return "$IDENTITY_ALIAS_KEY_PREFIX$userId"
+    }
+
+    private companion object {
+        const val IDENTITY_ALIAS_PREFS_NAME = "auth_identity_aliases"
+        const val IDENTITY_ALIAS_KEY_PREFIX = "alias:"
     }
 }

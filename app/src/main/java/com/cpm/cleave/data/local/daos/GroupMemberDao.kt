@@ -26,4 +26,7 @@ interface GroupMemberDao {
 
     @Query("SELECT EXISTS(SELECT 1 FROM group_members WHERE groupId = :groupId AND userId = :userId)")
     suspend fun isUserInGroup(groupId: String, userId: String): Boolean
+
+    @Query("DELETE FROM group_members WHERE groupId = :groupId")
+    suspend fun deleteMembersOfGroup(groupId: String)
 }

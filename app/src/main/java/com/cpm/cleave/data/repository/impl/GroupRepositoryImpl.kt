@@ -1036,9 +1036,10 @@ class GroupRepositoryImpl(
                 val isMember = runCatching {
                     remoteGroupHasMember(groupId, userId)
                 }.getOrElse { error ->
-                    isAuthoritative = false
                     // A deleted/forbidden group can return PERMISSION_DENIED here.
-                    // Do not abort the full fetch; simply treat it as non-membership.
+                    // Do not downgrade authoritative status here: collectionGroup membership
+                    // discovery already defines the authoritative scope for this user.
+                    // Treat probe failures as non-membership so stale local groups can be pruned.
                     if (error is com.google.firebase.firestore.FirebaseFirestoreException &&
                         error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED
                     ) {
@@ -1076,7 +1077,7 @@ class GroupRepositoryImpl(
                         ?.takeIf { it.isNotBlank() }
                         ?: member.id.takeIf { it.isNotBlank() }
                 }
-                .distinct()
+                .let { normalizeMembersWithIdentityAliases(it) }
 
             RemoteGroupPayload(
                 group = Group(
@@ -1130,7 +1131,7 @@ class GroupRepositoryImpl(
                     ?.takeIf { it.isNotBlank() }
                     ?: member.id.takeIf { it.isNotBlank() }
             }
-            .distinct()
+            .let { normalizeMembersWithIdentityAliases(it) }
 
         return Group(
             id = groupSnapshot.id,
@@ -1206,6 +1207,26 @@ class GroupRepositoryImpl(
         }
 
         return expenses to sharesByExpenseId
+    }
+
+    private fun normalizeMembersWithIdentityAliases(memberIds: List<String>): List<String> {
+        if (memberIds.isEmpty()) return emptyList()
+
+        val aliases = authSessionStore.getIdentityAliases()
+        if (aliases.isEmpty()) return memberIds.distinct()
+
+        val normalizedMembers = memberIds
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+
+        val memberSet = normalizedMembers.toSet()
+
+        return normalizedMembers
+            .map { memberId ->
+                val aliasTarget = aliases[memberId]
+                if (!aliasTarget.isNullOrBlank() && aliasTarget in memberSet) aliasTarget else memberId
+            }
+            .distinct()
     }
 
     private suspend fun syncGroupToRemote(group: Group) {

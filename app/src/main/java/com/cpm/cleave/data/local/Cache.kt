@@ -110,8 +110,11 @@ class Cache(context: Context) {
     }
 
     suspend fun deleteGroupById(groupId: String) {
-        val entity = groupDao.getGroupById(groupId) ?: return
-        groupDao.deleteGroup(entity)
+        database.withTransaction {
+            groupMemberDao.deleteMembersOfGroup(groupId)
+            val entity = groupDao.getGroupById(groupId) ?: return@withTransaction
+            groupDao.deleteGroup(entity)
+        }
     }
 
     suspend fun upsertGroupWithMembers(group: Group) {

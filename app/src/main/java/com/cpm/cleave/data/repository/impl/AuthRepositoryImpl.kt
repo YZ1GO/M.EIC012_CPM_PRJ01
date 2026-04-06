@@ -375,6 +375,7 @@ override suspend fun signUpWithEmail(
         if (shouldMerge && oldState.id != null && oldState.id != newUid) {
             // Migrate cloud data
             reassignAnonymousToRegisteredUserInFirestore(oldState.id, newUid, oldState.groupIds)
+            authSessionStore.rememberIdentityAlias(oldState.id, newUid)
         }
     }
 
@@ -857,12 +858,14 @@ override suspend fun signUpWithEmail(
             return
         }
 
-        val currentOwnerId = runCatching {
-            groupRef.get().awaitTaskResult().getString("ownerId")
-        }.getOrNull()
+        repeat(3) { attempt ->
+            val deleted = runCatching {
+                deleteLegacyMemberDocs()
+                true
+            }.getOrDefault(false)
 
-        if (currentOwnerId == newUserId) {
-            runCatching { deleteLegacyMemberDocs() }
+            if (deleted) return
+            if (attempt < 2) kotlinx.coroutines.delay(120)
         }
     }
 

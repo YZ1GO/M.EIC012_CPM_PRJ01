@@ -129,7 +129,15 @@ service cloud.firestore {
                 allow read: if signedIn() && isGroupMember(groupId);
                 allow create: if signedIn() && request.auth.uid == userId && validMemberPayload(userId);
                 allow update: if signedIn() && isGroupMember(groupId) && validMemberPayload(userId);
-                allow delete: if signedIn() && isGroupOwner(groupId);
+                // owner can remove any member; any current member can remove legacy anonymous
+                // member docs to support guest->registered merge cleanup.
+                allow delete: if signedIn() && (
+                    isGroupOwner(groupId) ||
+                    (
+                        isGroupMember(groupId) &&
+                        get(/databases/$(database)/documents/users/$(userId)).data.isAnonymous == true
+                    )
+                );
             }
 
             match /expenses/{expenseId} {
