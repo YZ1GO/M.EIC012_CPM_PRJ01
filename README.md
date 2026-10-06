@@ -1,4 +1,4 @@
-# cleave
+# Cleave
 
 ## Firebase setup
 
@@ -96,3 +96,9 @@ Required files:
 - `docs/.nojekyll`
 
 The join page is a browser fallback for `https://cpmcleave.netlify.app/join?joinCode=...` when the app does not open automatically.
+
+## Video Demo
+
+A video demonstration of the application can be found in the `docs` folder:
+
+[Watch the Video Demo](docs/lv_0_20260411162012.mp4)
